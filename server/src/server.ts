@@ -11,7 +11,11 @@ try {
   process.exit(1);
 }
 
-const pool = new pg.Pool({ connectionString: env.DATABASE_URL });
+// Read sslmode the way psql and Tiger's docs do. Without this, pg treats `require` as `verify-full`,
+// which rejects Tiger's certificate because it is signed by Timescale's own CA.
+const databaseUrl = new URL(env.DATABASE_URL);
+databaseUrl.searchParams.set('uselibpqcompat', 'true');
+const pool = new pg.Pool({ connectionString: databaseUrl.toString() });
 const app = await buildApp({ env, pool });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

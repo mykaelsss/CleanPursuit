@@ -235,3 +235,5 @@ CALL refresh_continuous_aggregate('report_daily_by_area_reporter', NULL, NULL);
 - Add a dashboard aggregate; it needs `area_id` on party events.
 - Decide where Gemini results are stored (likely a 1:1 `report_analysis` table).
 - Guild leaderboard, later.
+- Verify Tiger's TLS certificate in the API by trusting Timescale's CA.
+  For now the API reads `sslmode=require` the way `psql` does, so the connection is encrypted but the certificate is not checked.
