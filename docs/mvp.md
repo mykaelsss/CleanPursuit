@@ -178,6 +178,7 @@ Aggregates are real-time and the daily ones refresh every 5 minutes, so the demo
 | Auth | Built into the API: argon2id password hashes, JWT access tokens, rotating refresh tokens |
 | Database | Tiger Data (Postgres 18 with TimescaleDB, PostGIS, H3, citext) |
 | File storage | Cloudflare R2 |
+| Secrets | Infisical |
 | AI | Gemini (Flash-class) |
 | Drop-off search | Hand-verified seed rows first, Google Places as fallback |
 

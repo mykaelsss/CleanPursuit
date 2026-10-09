@@ -14,6 +14,7 @@ For the product side, see [mvp.md](mvp.md).
 | Postgres | 18.6, with built-in `uuidv7()` |
 | Extensions | TimescaleDB 2.30, PostGIS 3.6, h3 + h3_postgis 4.2 (pulls in postgis_raster), citext |
 | Applied | `001_initial_schema.sql`, `002_leaderboards_and_hotspots.sql` |
+| Credentials | Connection string stored in Infisical, never in the repo |
 
 ## Conventions
 
