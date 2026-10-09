@@ -27,6 +27,7 @@ Only the party leader ends a party, and XP goes to checked-in members when it en
 
 ## Repo layout
 
+- `app/`: React Native app (Expo). Has its own `AGENTS.md` with Expo guidance.
 - `server/db/migrations/`: numbered SQL migrations, applied in order.
 - `docs/`: product and database docs.
 
