@@ -24,14 +24,14 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 | --- | --- |
 | Database | Migrations 001 and 002 applied to the DEV Tiger Data service |
 | App | Expo starter project in `app/` |
-| API | Not started |
+| API | Fastify scaffold in `server/` with a health check |
 
 ## Tech stack
 
 | Layer | Choice |
 | --- | --- |
 | App | React Native with Expo and Expo Router |
-| API | Node.js, with its own auth (argon2id, JWT access tokens, rotating refresh tokens) |
+| API | Node.js 24 with Fastify 5, TypeScript, Zod and `pg`, with its own auth (argon2id, JWT access tokens, rotating refresh tokens) |
 | Database | Tiger Data: Postgres 18 with TimescaleDB, PostGIS, H3 and citext |
 | File storage | Cloudflare R2 |
 | AI | Gemini, called once per report |
@@ -41,6 +41,8 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 
 ```
 app/                    React Native app (Expo)
+server/src/             Fastify API
+server/test/            API tests
 server/db/migrations/   Numbered SQL migrations, applied in order
 docs/mvp.md             Product summary: scope, core loop, XP rules, risks
 docs/database.md        Database design: tables, relationships, aggregates
@@ -51,9 +53,31 @@ AGENTS.md               Instructions for coding agents (CLAUDE.md links to it)
 
 ### Prerequisites
 
-- Node.js and npm
+- Node.js 24 or later, and npm
 - The [Infisical CLI](https://infisical.com/docs/cli/overview), logged in to the project
 - `psql`, for applying migrations
+
+### Run the API
+
+```bash
+cd server
+npm install
+infisical run -- npm run dev
+```
+
+The API listens on port 3000 by default and restarts when files change.
+`GET /health` checks the API and the database, and interactive API docs are at http://localhost:3000/docs outside production.
+To reach the API from a phone running Expo Go, use your computer's LAN address instead of `localhost`.
+
+Node runs the TypeScript directly, so there is no build step.
+Before committing, run:
+
+```bash
+npm run typecheck
+npm test
+```
+
+Without Infisical, copy `server/.env.example` to `server/.env` and fill it in; `npm run dev` loads it automatically.
 
 ### Run the app
 
@@ -82,8 +106,8 @@ Applied migrations are never edited; changes go in a new numbered file.
 ## Secrets
 
 All secrets live in Infisical: the database connection string, JWT keys, R2 credentials and the Gemini key.
-Never commit `.env` files.
-If a local `.env` is needed, keep it in `.gitignore` and commit a `.env.example` that lists variable names only.
+Never commit `.env` files; the root `.gitignore` excludes every `.env` file except `.env.example`.
+`server/.env.example` lists the variable names the API reads, and `server/src/env.ts` checks them at startup.
 
 ## Docs
 

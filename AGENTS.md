@@ -13,7 +13,7 @@ Read the relevant doc before changing product behavior or the schema, and update
 ## Stack
 
 - App: React Native
-- API: Node.js, with its own auth (argon2id, JWT access tokens, rotating refresh tokens)
+- API: Node.js 24 with Fastify 5, TypeScript, Zod and `pg`, with its own auth (argon2id, JWT access tokens, rotating refresh tokens)
 - Database: Tiger Data (Postgres 18, TimescaleDB, PostGIS, H3, citext), service `clean-pursuit` (`sm60nzjanh`, DEV)
 - Files: Cloudflare R2
 - Secrets: Infisical, injected at runtime with `infisical run -- <command>`
@@ -28,8 +28,21 @@ Only the party leader ends a party, and XP goes to checked-in members when it en
 ## Repo layout
 
 - `app/`: React Native app (Expo). Has its own `AGENTS.md` with Expo guidance.
+- `server/src/`: Fastify API.
+  `app.ts` builds the app, `server.ts` starts it, `env.ts` validates environment variables, `plugins/` holds shared plugins, `routes/` holds one plugin per resource.
+- `server/test/`: API tests using `node:test` and `app.inject()`.
 - `server/db/migrations/`: numbered SQL migrations, applied in order.
 - `docs/`: product and database docs.
+
+## Server conventions
+
+- Node runs the TypeScript directly (type stripping), so there is no build step.
+  Import local files with the `.ts` extension, and use only erasable syntax (no `enum`, `namespace` or constructor parameter properties).
+- Every route declares Zod schemas for its input and every response status, so undeclared fields such as password hashes never leave the API.
+- Write plain parameterized SQL through `app.db` (a `pg` pool); no ORM.
+- Shared plugins are wrapped in `fastify-plugin`; route plugins are not.
+- Add new environment variables to `src/env.ts` and `.env.example` in the same change.
+- Run `npm run typecheck` and `npm test` in `server/` before committing.
 
 ## Rules
 

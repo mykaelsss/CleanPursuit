@@ -174,7 +174,7 @@ Aggregates are real-time and the daily ones refresh every 5 minutes, so the demo
 | Layer | Choice |
 | --- | --- |
 | App | React Native |
-| API | Node.js |
+| API | Node.js 24, Fastify 5, TypeScript, Zod, `pg` with plain SQL |
 | Auth | Built into the API: argon2id password hashes, JWT access tokens, rotating refresh tokens |
 | Database | Tiger Data (Postgres 18 with TimescaleDB, PostGIS, H3, citext) |
 | File storage | Cloudflare R2 |
