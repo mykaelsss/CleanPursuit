@@ -5,7 +5,7 @@ import { withTransaction } from '../lib/db.ts';
 import { type DifficultyTier, difficultyTierSchema } from '../lib/difficulty.ts';
 import { errorSchema, HttpError } from '../lib/errors.ts';
 import { photoSchema } from '../lib/files.ts';
-import { geographyPoint, locationSchema, selectLocation } from '../lib/geo.ts';
+import { geographyPoint, locationSchema, placeNameSchema, selectLocation } from '../lib/geo.ts';
 import { perUserRateLimit } from '../lib/rate-limit.ts';
 import type { Storage } from '../lib/storage.ts';
 import { userSummarySchema } from '../lib/users.ts';
@@ -22,6 +22,7 @@ const eventSchema = z.object({
   title: z.string().describe("The quest's title"),
   description: z.string().describe("The report's description of the site"),
   location: locationSchema,
+  placeName: placeNameSchema.nullable(),
   difficultyTier: difficultyTierSchema,
   status: z.enum(['scheduled', 'active']).describe('active once someone has checked in'),
   scheduledStart: z.iso.datetime(),
@@ -58,7 +59,7 @@ const OPEN_EVENT = `p.scheduled_start IS NOT NULL AND p.status IN ('scheduled', 
 // $1 is the signed-in user's id.
 const EVENT_COLUMNS = `
   p.id, p.quest_id, p.leader_user_id, p.status, p.scheduled_start, p.scheduled_end,
-  q.title, r.description, ${selectLocation('r.location')}, r.difficulty_tier,
+  q.title, r.description, ${selectLocation('r.location')}, r.place_name, r.difficulty_tier,
   u.username AS organizer_username, r.photo_file_id, f.key AS photo_key,
   (SELECT count(*)::integer FROM party_member m
    WHERE m.party_id = p.id AND m.status IN ${ATTENDING}) AS attendee_count,
@@ -83,6 +84,7 @@ interface EventRow {
   description: string;
   latitude: number;
   longitude: number;
+  place_name: string | null;
   difficulty_tier: DifficultyTier;
   organizer_username: string;
   photo_file_id: string;
@@ -98,6 +100,7 @@ async function toEvent(row: EventRow, userId: string, storage: Storage): Promise
     title: row.title,
     description: row.description,
     location: { latitude: row.latitude, longitude: row.longitude },
+    placeName: row.place_name,
     difficultyTier: row.difficulty_tier,
     status: row.status,
     scheduledStart: row.scheduled_start.toISOString(),

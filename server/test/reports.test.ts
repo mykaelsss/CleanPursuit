@@ -127,6 +127,7 @@ describe('reports and quests', { skip }, () => {
       photoFileId: await uploadPhoto(app, storage, authorization),
       description: '  Bottles and a broken mirror by the bench  ',
       location: spot,
+      placeName: '  Tompkins Square Park, East Village  ',
       categories: ['glass', 'plastic', 'glass'],
       hazards: ['broken_glass'],
       estimatedVolume: { minGallons: 20, maxGallons: 30 },
@@ -134,6 +135,7 @@ describe('reports and quests', { skip }, () => {
     assert.equal(res.statusCode, 201);
     const report = res.json();
     assert.equal(report.description, 'Bottles and a broken mirror by the bench');
+    assert.equal(report.placeName, 'Tompkins Square Park, East Village');
     assert.equal(report.difficultyTier, 'hard');
     assert.deepEqual(
       report.categories.map((c: { code: string }) => c.code),
@@ -239,6 +241,7 @@ describe('reports and quests', { skip }, () => {
         photoFileId: await uploadPhoto(app, storage, authorization),
         description: 'Trash pile',
         location: { latitude: spot.latitude + offset, longitude: spot.longitude },
+        ...(offset < 0.001 ? { placeName: 'By the bench' } : {}),
         categories: ['mixed'],
         hazards: ['sharps'],
       });
@@ -268,6 +271,8 @@ describe('reports and quests', { skip }, () => {
     assert.ok(quests[0].distanceM >= 95 && quests[0].distanceM <= 105, `distance ${quests[0].distanceM}`);
     assert.equal(quests[0].difficultyTier, 'legendary');
     assert.deepEqual(quests[0].hazards, ['sharps']);
+    assert.equal(quests[0].placeName, 'By the bench');
+    assert.equal(quests[1].placeName, null);
 
     const narrow = await list(500);
     assert.deepEqual(

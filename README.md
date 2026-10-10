@@ -22,7 +22,7 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 
 | Part | State |
 | --- | --- |
-| Database | Migrations 001 to 004 applied to the DEV Tiger Data service |
+| Database | Migrations 001 to 006 applied to the DEV Tiger Data service (005 is on the `biohazard-dropoffs` branch) |
 | App | Expo starter project in `app/` |
 | API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports and quests |
 
@@ -110,7 +110,7 @@ While it runs, anyone with the API tunnel URL can reach the API and the DEV data
 ### Apply database migrations
 
 Migrations run in order against the Tiger Data service, one file at a time.
-Only run files that have not been applied yet; 001 to 004 are already on the DEV service.
+Only run files that have not been applied yet; 001 to 006 are already on the DEV service.
 The connection string comes from Infisical, so wrap the command in `infisical run`:
 
 ```bash
@@ -180,6 +180,8 @@ Photo URLs in responses expire after an hour, so cache images by file id rather 
   The high end may be at most 1.5 times the low end (or one kitchen bag above it); wider ranges get 400 `INVALID_VOLUME_RANGE`.
   See [Trash amount](docs/mvp.md#trash-amount).
 - `POST /reports` files a report.
+  Send `placeName`, a readable name for the spot such as "Tompkins Square Park, East Village", so the app can show it instead of coordinates.
+  Suggest one from the phone's geocoder and let the reporter edit it.
   The difficulty tier comes from the tags the reporter sends, using the rules in [docs/mvp.md](docs/mvp.md#difficulty-tier).
   Tags that Gemini suggested and the reporter kept are recorded with `gemini` as their source.
   If the spot is already reported, the report is still saved and `duplicateOf` points at the original and its quest.

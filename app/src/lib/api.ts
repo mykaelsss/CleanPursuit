@@ -41,6 +41,8 @@ export interface CleanupEvent {
   title: string;
   description: string;
   location: { latitude: number; longitude: number };
+  // A readable name the reporter gave the spot; null on older reports.
+  placeName: string | null;
   difficultyTier: DifficultyTier;
   status: 'scheduled' | 'active';
   scheduledStart: string;

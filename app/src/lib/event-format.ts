@@ -54,23 +54,24 @@ export const TIER_LABELS: Record<DifficultyTier, string> = {
   legendary: 'Legendary',
 };
 
-const addresses = new Map<string, Promise<string>>();
+const addresses = new Map<string, Promise<string | null>>();
 
-// A street address from the phone's geocoder, cached per point. Falls back to coordinates.
-export function lookupAddress(location: { latitude: number; longitude: number }): Promise<string> {
+// A street address from the phone's geocoder, cached per point.
+// Null when the geocoder has nothing or is unavailable, as on web.
+export function lookupAddress(location: { latitude: number; longitude: number }): Promise<string | null> {
   const key = `${location.latitude.toFixed(5)},${location.longitude.toFixed(5)}`;
   let address = addresses.get(key);
   if (!address) {
     address = Location.reverseGeocodeAsync(location)
       .then(([place]) => {
-        if (!place) return key;
+        if (!place) return null;
         const street = [place.streetNumber, place.street].filter(Boolean).join(' ');
         const area = place.district ?? place.subregion ?? place.city;
-        return [street || place.name, area].filter(Boolean).join(', ') || key;
+        return [street || place.name, area].filter(Boolean).join(', ') || null;
       })
       .catch(() => {
         addresses.delete(key);
-        return key;
+        return null;
       });
     addresses.set(key, address);
   }

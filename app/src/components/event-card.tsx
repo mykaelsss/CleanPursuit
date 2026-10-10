@@ -40,19 +40,22 @@ interface EventCardProps {
 export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose, titleRef }: EventCardProps) {
   const theme = useTheme();
   const leaderTag = useTierColors('legendary');
-  // Keyed by event, so switching events never shows the previous event's address.
-  const [resolved, setResolved] = useState<{ eventId: string; address: string } | null>(null);
-  const address = resolved?.eventId === event.id ? resolved.address : null;
+  // Older reports have no place name, so look up an address. Keyed by event, so switching
+  // events never shows the previous event's address.
+  const [resolved, setResolved] = useState<{ eventId: string; address: string | null } | null>(null);
+  const lookup = resolved?.eventId === event.id ? resolved : null;
+  const where = event.placeName ?? (lookup ? (lookup.address ?? 'Pinned on the map') : 'Finding address…');
   const partySize = detail?.attendeeCount ?? event.attendeeCount;
   const duration = formatDuration(event.scheduledStart, event.scheduledEnd);
 
   useEffect(() => {
+    if (event.placeName) return;
     let current = true;
     lookupAddress(event.location).then((a) => current && setResolved({ eventId: event.id, address: a }));
     return () => {
       current = false;
     };
-  }, [event.id, event.location]);
+  }, [event.id, event.location, event.placeName]);
 
   return (
     <View style={styles.container}>
@@ -151,7 +154,7 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
       ) : null}
 
       <View style={styles.facts}>
-        <Fact label="Where" value={address ?? 'Finding address…'} />
+        <Fact label="Where" value={where} />
         <Fact
           label="When"
           value={`${formatEventTime(event.scheduledStart, event.scheduledEnd)} (${duration})`}

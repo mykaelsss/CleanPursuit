@@ -31,6 +31,7 @@ interface DemoEvent {
   title: string;
   description: string;
   location: { latitude: number; longitude: number };
+  placeName: string;
   categories: string[];
   hazards: string[];
   estimatedVolume: VolumeRange;
@@ -52,6 +53,7 @@ const EVENTS: DemoEvent[] = [
     description:
       'Plastic bottles, bags and food wrappers have washed up on the rocks north of Pier 84. Most of it is light plastic that bags easily.',
     location: { latitude: 40.7637, longitude: -73.999 },
+    placeName: 'Pier 84, Hudson River Park',
     categories: ['plastic', 'mixed'],
     hazards: [],
     estimatedVolume: { minGallons: 20, maxGallons: 30 },
@@ -67,6 +69,7 @@ const EVENTS: DemoEvent[] = [
     description:
       'Cans, bottles and takeout trash have piled up under the shrubs along the Avenue A side of the park after a busy weekend.',
     location: { latitude: 40.7265, longitude: -73.9815 },
+    placeName: 'Tompkins Square Park, East Village',
     categories: ['plastic', 'metal', 'glass', 'paper'],
     hazards: [],
     estimatedVolume: { minGallons: 50, maxGallons: 70 },
@@ -83,6 +86,7 @@ const EVENTS: DemoEvent[] = [
     description:
       'Bottles, cans and plastic are scattered down the wooded slope of the Ravine below the Long Meadow. Some of the bottles are broken.',
     location: { latitude: 40.6655, longitude: -73.9705 },
+    placeName: 'The Ravine, Prospect Park',
     categories: ['glass', 'metal', 'plastic'],
     hazards: ['broken_glass'],
     estimatedVolume: { minGallons: 30, maxGallons: 40 },
@@ -97,6 +101,7 @@ const EVENTS: DemoEvent[] = [
     title: 'Meadow Lake shoreline cleanup',
     description: 'Cans, cups and glass bottles are caught between the rocks along the path around Meadow Lake.',
     location: { latitude: 40.74, longitude: -73.8407 },
+    placeName: 'Meadow Lake, Flushing Meadows Corona Park',
     categories: ['metal', 'plastic', 'glass'],
     hazards: [],
     estimatedVolume: { minGallons: 8, maxGallons: 12 },
@@ -113,6 +118,7 @@ const EVENTS: DemoEvent[] = [
       'Someone dumped a fridge, a washer, furniture and bags of trash on the river bank beside the footpath. ' +
       'Syringes were also seen near the outfall and have been reported to 311 for the city to collect.',
     location: { latitude: 40.8406, longitude: -73.874 },
+    placeName: 'Bronx River at West Farms',
     categories: ['mixed', 'metal', 'plastic'],
     hazards: ['bulky_items', 'sharps'],
     estimatedVolume: { minGallons: 300, maxGallons: 420 },
@@ -129,6 +135,7 @@ const EVENTS: DemoEvent[] = [
       'A long line of bottles, cups and plastic washed up along the tide line between the pier and the aquarium. ' +
       'Meet at the boardwalk by Stillwell Avenue.',
     location: { latitude: 40.5735, longitude: -73.982 },
+    placeName: 'Coney Island Beach at Stillwell Ave',
     categories: ['plastic', 'mixed'],
     hazards: [],
     estimatedVolume: { minGallons: 60, maxGallons: 90 },
@@ -143,6 +150,7 @@ const EVENTS: DemoEvent[] = [
     title: 'Newtown Creek shoreline cleanup',
     description: 'Plastic bottles and jugs are piled up on the rocks along the creek at the end of Manhattan Avenue.',
     location: { latitude: 40.7372, longitude: -73.9472 },
+    placeName: 'Manhattan Ave at Newtown Creek, Greenpoint',
     categories: ['plastic'],
     hazards: [],
     estimatedVolume: { minGallons: 130, maxGallons: 180 },
@@ -159,6 +167,7 @@ const EVENTS: DemoEvent[] = [
       'A broken TV and a crate of electronics were left on the corner of Fort Washington Avenue, with loose trash around them. ' +
       'We will carry the electronics to the e-waste drop-off and bag the rest.',
     location: { latitude: 40.851, longitude: -73.937 },
+    placeName: 'Fort Washington Ave & W 181st St',
     categories: ['electronics', 'plastic', 'paper'],
     hazards: [],
     estimatedVolume: { minGallons: 15, maxGallons: 25 },
@@ -174,6 +183,7 @@ const EVENTS: DemoEvent[] = [
     description:
       'Bottle caps, straws and plastic fragments are scattered along the beach near Beach 90th Street after the last storm.',
     location: { latitude: 40.583, longitude: -73.816 },
+    placeName: 'Beach 90th St, Rockaway Beach',
     categories: ['plastic'],
     hazards: [],
     estimatedVolume: { minGallons: 30, maxGallons: 45 },
@@ -188,6 +198,7 @@ const EVENTS: DemoEvent[] = [
     title: 'Clove Lakes Park fence line cleanup',
     description: 'Wrappers, cups and bottles are caught in the hedge and along the old fence at the edge of the park.',
     location: { latitude: 40.6195, longitude: -74.1135 },
+    placeName: 'Clove Lakes Park, Staten Island',
     categories: ['plastic', 'paper', 'mixed'],
     hazards: [],
     estimatedVolume: { minGallons: 20, maxGallons: 30 },
@@ -202,6 +213,7 @@ const EVENTS: DemoEvent[] = [
     title: 'Jamaica Avenue sidewalk sweep',
     description: 'Receipts, cups and cigarette packs line the sidewalk and curb outside the shops near Parsons Boulevard.',
     location: { latitude: 40.7025, longitude: -73.801 },
+    placeName: 'Jamaica Ave & Parsons Blvd, Jamaica',
     categories: ['paper', 'plastic'],
     hazards: [],
     estimatedVolume: { minGallons: 10, maxGallons: 15 },
@@ -355,9 +367,9 @@ async function insertEvent(
   );
 
   const report = await client.query<{ id: string }>(
-    `INSERT INTO report (reporter_user_id, photo_file_id, description, location, difficulty_tier,
+    `INSERT INTO report (reporter_user_id, photo_file_id, description, location, place_name, difficulty_tier,
                          estimated_volume_min_gallons, estimated_volume_max_gallons, created_at)
-     VALUES ($1, $2, $3, ${geographyPoint(4, 5)}, $6, $7, $8, $9)
+     VALUES ($1, $2, $3, ${geographyPoint(4, 5)}, $6, $7, $8, $9, $10)
      RETURNING id`,
     [
       reporterId,
@@ -365,6 +377,7 @@ async function insertEvent(
       event.description,
       event.location.longitude,
       event.location.latitude,
+      event.placeName,
       difficultyTier(event),
       event.estimatedVolume.minGallons,
       event.estimatedVolume.maxGallons,
