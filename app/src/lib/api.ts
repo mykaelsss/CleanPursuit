@@ -22,6 +22,18 @@ export interface Tokens {
 
 export type Session = Tokens & { user: User };
 
+// Users with equal XP share a rank.
+export interface LeaderboardEntry {
+  rank: number;
+  user: { id: string; username: string };
+  totalXp: number;
+}
+
+export interface Leaderboard {
+  entries: LeaderboardEntry[];
+  me: { rank: number; totalXp: number };
+}
+
 // Mirrors the API's `errorSchema`. `code` is stable, so callers branch on it rather than on `message`.
 export class ApiError extends Error {
   readonly status: number;

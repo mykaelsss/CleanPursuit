@@ -14,6 +14,7 @@ For the product side, see [mvp.md](mvp.md).
 | Postgres | 18.6, with built-in `uuidv7()` |
 | Extensions | TimescaleDB 2.30, PostGIS 3.6, h3 + h3_postgis 4.2 (pulls in postgis_raster), citext |
 | Applied | `001_initial_schema.sql`, `002_leaderboards_and_hotspots.sql` |
+| Pending | `003_leaderboard_index.sql` |
 | Credentials | Connection string stored in Infisical, never in the repo |
 
 ## Conventions
@@ -212,7 +213,7 @@ All aggregates are real-time (`materialized_only = false`) and bucket in UTC.
 | `area_hotspot_30d` | Plain view | `report_daily_by_area_reporter` | Always current |
 
 - XP aggregates carry `xp`, `minutes_on_site` and `parties` per user per bucket, indexed on `(bucket, xp DESC)`.
-- All-time XP is `app_user.total_xp`.
+- All-time XP is `app_user.total_xp`, indexed on `(total_xp DESC, username)` for the all-time leaderboard.
 - `area_hotspot_30d` returns `distinct_reporters`, `reports` and `last_reported_day` per `area_id` for the last 30 days.
 - The heat map and the hotspot bonus use `distinct_reporters`, so one person re-reporting a spot cannot heat it up alone.
 - The bonus threshold (for example 3 or more reporters) lives in the API.
