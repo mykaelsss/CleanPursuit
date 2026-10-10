@@ -134,6 +134,14 @@ There are two kinds, derived from whether a schedule is set:
 | Event (scheduled party) | Someone picks a time slot and asks for help | The person who scheduled it |
 | Bounty (walk-up party) | Anyone at the site checks in; others join the live party | The first person to check in |
 
+Event rules:
+
+- Anyone can schedule an event on an open quest, and becomes its leader (the organizer) and first attendee.
+- Events start in the future and last at most 12 hours.
+- Anyone can join an event until it ends, and can withdraw until they check in.
+- The organizer cannot withdraw from their own event.
+- Only the organizer can see attendees' email addresses.
+
 Leader rules:
 
 - Every party always has a leader, and the leader is always a member.
@@ -183,7 +191,15 @@ stateDiagram-v2
 - Cleaning a hotspot adds bonus XP.
 - XP feeds daily, weekly and monthly leaderboards plus each user's all-time total.
 
-The exact numbers (base rate, tier multipliers, cap, hotspot threshold) are still open.
+
+| Rule | Value |
+| --- | --- |
+| Base rate | 100 XP per hour on site |
+| Tier multiplier | Easy 1x, medium 1.5x, hard 2x, legendary 3x |
+| Cap | 3 hours on site per party |
+
+An event card shows "up to" the XP for being on site for the whole time slot.
+The hotspot bonus and threshold are still open.
 
 ### Levels
 
@@ -296,7 +312,8 @@ Done:
 
 Open:
 
-- [ ] XP numbers: base rate, tier multipliers, per-quest cap, hotspot threshold.
+- [x] XP numbers: 100 XP per hour, tier multipliers and a 3-hour cap (see [XP](#xp)).
+- [ ] Hotspot bonus XP and threshold.
 - [ ] Geofence radius for check-in and on-site pings.
 - [ ] Demo region, for seed data and drop-off locations.
 - [ ] Gear seed data for the equipment lookup.
