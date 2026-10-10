@@ -44,6 +44,7 @@ app/                    React Native app (Expo)
 server/src/             Fastify API
 server/test/            API tests
 server/db/migrations/   Numbered SQL migrations, applied in order
+scripts/phone.sh        Runs the API and app for Expo Go on a phone, over tunnels
 docs/mvp.md             Product summary: scope, core loop, XP rules, risks
 docs/database.md        Database design: tables, relationships, aggregates
 AGENTS.md               Instructions for coding agents (CLAUDE.md links to it)
@@ -91,6 +92,19 @@ npx expo start
 
 From the Expo output you can open the app in an iOS simulator, an Android emulator, a browser or Expo Go.
 Add packages with `npx expo install <package>` so versions match the Expo SDK.
+The app has `expo-dev-client`, so press `s` in the Expo output (or start with `npx expo start --go`) to open it in Expo Go.
+
+### Run the app on your phone
+
+```bash
+./scripts/phone.sh
+```
+
+This starts the API, puts it and Expo behind tunnels and points the app at the API tunnel, so it works on any network, including a phone hotspot.
+Scan the QR code with your phone's camera to open the app in Expo Go, and press Ctrl+C to stop everything.
+Expo Go on iOS needs you logged in to the same Expo account in the app and in the terminal (`npx expo login`).
+It needs the Infisical CLI and [ngrok](https://ngrok.com) with an authtoken; the first run may ask to install `@expo/ngrok`.
+While it runs, anyone with the API tunnel URL can reach the API and the DEV database behind it.
 
 ### Apply database migrations
 
