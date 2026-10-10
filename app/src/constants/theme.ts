@@ -35,10 +35,11 @@ export const Colors = {
     badge: '#8DD9C0',
     onBadge: '#243B35',
 
-    poster: '#EBDFC4',
-    posterFiber: '#F8F2E4',
-    posterInk: '#3B2B20',
-    posterPhoto: '#D9CBAE',
+    poster: '#DABF8F',
+    posterFiber: '#EFE3C8',
+    posterStain: '#7A4416',
+    posterInk: '#3A2414',
+    posterPhoto: 'rgba(122, 74, 30, 0.12)',
   },
   dark: {
     text: '#F3FAFF',
@@ -71,10 +72,11 @@ export const Colors = {
     badge: '#8DD9C0',
     onBadge: '#243B35',
 
-    poster: '#EBDFC4',
-    posterFiber: '#F8F2E4',
-    posterInk: '#3B2B20',
-    posterPhoto: '#D9CBAE',
+    poster: '#DABF8F',
+    posterFiber: '#EFE3C8',
+    posterStain: '#7A4416',
+    posterInk: '#3A2414',
+    posterPhoto: 'rgba(122, 74, 30, 0.12)',
   },
 } as const;
 

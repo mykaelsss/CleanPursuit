@@ -36,7 +36,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "generate:paper": "node scripts/generate-paper-texture.mjs"
   },
   "private": true
 }
