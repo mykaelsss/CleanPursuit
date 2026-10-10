@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SignJWT } from 'jose';
 import { buildApp } from '../src/app.ts';
-import { fakePool, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakePool, fakeStorage, testEnv as env } from './helpers.ts';
 
 // These cases are rejected before any query runs, so they need no database.
 
@@ -20,7 +20,7 @@ function sign(secret: string, expiresAt: number) {
 }
 
 async function getMe(authorization?: string) {
-  const app = await buildApp({ env, pool: fakePool() });
+  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer() });
   try {
     return await app.inject({ method: 'GET', url: '/me', headers: authorization ? { authorization } : {} });
   } finally {
@@ -61,7 +61,7 @@ test('GET /me with an expired token returns 401 ACCESS_TOKEN_EXPIRED', async () 
 });
 
 test('login is rate limited per IP', async (t) => {
-  const app = await buildApp({ env, pool: fakePool() });
+  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer() });
   t.after(() => app.close());
 
   const statuses: number[] = [];

@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { after, describe, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
-import { testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakeStorage, testEnv as env } from './helpers.ts';
 
 // These tests run against the real database and clean up the users they create.
 // Run them with `infisical run -- npm test`; without DATABASE_URL they are skipped.
@@ -18,7 +18,7 @@ function newUser() {
 }
 
 async function startApp(t: { after: (fn: () => Promise<unknown>) => void }) {
-  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL) });
+  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage: fakeStorage(), analyzer: fakeAnalyzer() });
   t.after(() => app.close());
   return app;
 }

@@ -23,13 +23,13 @@ export default function AppCard({
       type="backgroundElement"
       style={[styles.card, { borderColor: theme.border }]}
     >
-      {(title || rightContent) && (
+      {title || rightContent ? (
         <View style={styles.header}>
-          {title && <ThemedText type="smallBold">{title}</ThemedText>}
+          {title ? <ThemedText type="smallBold">{title}</ThemedText> : null}
 
           {rightContent}
         </View>
-      )}
+      ) : null}
 
       {children}
     </ThemedView>

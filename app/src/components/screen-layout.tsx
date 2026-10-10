@@ -3,6 +3,7 @@ import { Platform, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
+import { BottomTabInset } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 
 type ScreenLayoutProps = {
@@ -24,7 +25,7 @@ export default function ScreenLayout({
   return (
     <ScrollView
       style={[styles.screen, { backgroundColor: theme.background }]}
-      contentContainerStyle={{ paddingBottom: 24 }}
+      contentContainerStyle={{ paddingBottom: BottomTabInset + 24 }}
     >
       <View style={[styles.header, { backgroundColor: theme.header }]}>
         <View
@@ -55,9 +56,9 @@ export default function ScreenLayout({
         <View style={styles.heading}>
           <ThemedText type="subtitle">{title}</ThemedText>
 
-          {subtitle && (
+          {subtitle ? (
             <ThemedText themeColor="textSecondary">{subtitle}</ThemedText>
-          )}
+          ) : null}
         </View>
 
         {children}

@@ -27,3 +27,7 @@ export async function withTransaction<T>(pool: pg.Pool, fn: (client: pg.PoolClie
 export function isUniqueViolation(err: unknown, constraint: string): boolean {
   return err instanceof pg.DatabaseError && err.code === '23505' && err.constraint === constraint;
 }
+
+export function isForeignKeyViolation(err: unknown, constraint: string): boolean {
+  return err instanceof pg.DatabaseError && err.code === '23503' && err.constraint === constraint;
+}

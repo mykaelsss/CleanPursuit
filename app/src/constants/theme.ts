@@ -1,83 +1,97 @@
-import "@/global.css";
+import '@/global.css';
 
-import { Platform } from "react-native";
+import { Platform } from 'react-native';
 
+// App colors for light and dark mode.
 export const Colors = {
   light: {
-    text: "#243B35",
-    textSecondary: "#58736A",
+    text: '#243B35',
+    textSecondary: '#58736A',
 
-    background: "#F0FAE9",
-    backgroundElement: "#FFFFFF",
-    backgroundSelected: "#D5F1FF",
+    background: '#F0FAE9',
+    backgroundElement: '#FFFFFF',
+    backgroundSelected: '#D5F1FF',
 
-    primary: "#72C94B",
-    onPrimary: "#243B35",
-    header: "#A8E477",
+    tint: '#1F8A4C',
+    onTint: '#ffffff',
+    error: '#CE2C31',
 
-    accent: "#18B9E0",
-    highlight: "#D5F1FF",
+    primary: '#72C94B',
+    onPrimary: '#243B35',
+    header: '#A8E477',
 
-    sage: "#C5E5AE",
-    sageText: "#354B2C",
+    accent: '#18B9E0',
+    highlight: '#D5F1FF',
 
-    reward: "#FFD568",
-    onReward: "#49320C",
+    sage: '#C5E5AE',
+    sageText: '#354B2C',
 
-    earth: "#B58B62",
-    border: "#CBE5BB",
+    reward: '#FFD568',
+    onReward: '#49320C',
 
-    badge: "#8DD9C0",
-    onBadge: "#243B35",
+    earth: '#B58B62',
+    border: '#CBE5BB',
+
+    badge: '#8DD9C0',
+    onBadge: '#243B35',
   },
   dark: {
-    text: "#F3FAFF",
-    textSecondary: "#B6CAD7",
+    text: '#F3FAFF',
+    textSecondary: '#B6CAD7',
 
-    background: "#182733",
-    backgroundElement: "#263C4B",
-    backgroundSelected: "#285A73",
+    background: '#182733',
+    backgroundElement: '#263C4B',
+    backgroundSelected: '#285A73',
 
-    primary: "#97E56A",
-    onPrimary: "#243B35",
-    header: "#A8E477",
+    tint: '#3DD68C',
+    onTint: '#0B2A1A',
+    error: '#FF9592',
 
-    accent: "#55D8FA",
-    highlight: "#285A73",
+    primary: '#97E56A',
+    onPrimary: '#243B35',
+    header: '#A8E477',
 
-    sage: "#C5E5AE",
-    sageText: "#354B2C",
+    accent: '#55D8FA',
+    highlight: '#285A73',
 
-    reward: "#FFD568",
-    onReward: "#49320C",
+    sage: '#C5E5AE',
+    sageText: '#354B2C',
 
-    earth: "#C9A37A",
-    border: "#466273",
+    reward: '#FFD568',
+    onReward: '#49320C',
 
-    badge: "#8DD9C0",
-    onBadge: "#243B35",
+    earth: '#C9A37A',
+    border: '#466273',
+
+    badge: '#8DD9C0',
+    onBadge: '#243B35',
   },
 } as const;
+
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
 export const Fonts = Platform.select({
   ios: {
-    sans: "system-ui",
-    serif: "ui-serif",
-    rounded: "ui-rounded",
-    mono: "ui-monospace",
+    /** iOS `UIFontDescriptorSystemDesignDefault` */
+    sans: 'system-ui',
+    /** iOS `UIFontDescriptorSystemDesignSerif` */
+    serif: 'ui-serif',
+    /** iOS `UIFontDescriptorSystemDesignRounded` */
+    rounded: 'ui-rounded',
+    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
+    mono: 'ui-monospace',
   },
   default: {
-    sans: "normal",
-    serif: "serif",
-    rounded: "normal",
-    mono: "monospace",
+    sans: 'normal',
+    serif: 'serif',
+    rounded: 'normal',
+    mono: 'monospace',
   },
   web: {
-    sans: "var(--font-display)",
-    serif: "var(--font-serif)",
-    rounded: "var(--font-rounded)",
-    mono: "var(--font-mono)",
+    sans: 'var(--font-display)',
+    serif: 'var(--font-serif)',
+    rounded: 'var(--font-rounded)',
+    mono: 'var(--font-mono)',
   },
 });
 
@@ -92,5 +106,4 @@ export const Spacing = {
 } as const;
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
-
 export const MaxContentWidth = 800;
