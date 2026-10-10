@@ -2,14 +2,25 @@ import * as Location from 'expo-location';
 
 import type { DifficultyTier } from '@/lib/api';
 
-// "Sat, Oct 11 · 10:00 AM - 12:00 PM", with both dates when the event runs past midnight.
+// "Sat, Oct 11, 10:00 AM - 12:00 PM", with both dates when the event runs past midnight.
 export function formatEventTime(startIso: string, endIso: string): string {
   const start = new Date(startIso);
   const end = new Date(endIso);
   const day = (d: Date) => d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   const time = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   const endText = day(start) === day(end) ? time(end) : `${day(end)} ${time(end)}`;
-  return `${day(start)} · ${time(start)} - ${endText}`;
+  return `${day(start)}, ${time(start)} - ${endText}`;
+}
+
+// The same range for screen readers, with full day and month names and no symbols:
+// "Saturday, October 11, 10:00 AM to 12:00 PM".
+export function describeEventTime(startIso: string, endIso: string): string {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const day = (d: Date) => d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const time = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const endText = day(start) === day(end) ? time(end) : `${day(end)}, ${time(end)}`;
+  return `${day(start)}, ${time(start)} to ${endText}`;
 }
 
 export function formatDuration(startIso: string, endIso: string): string {
@@ -23,6 +34,17 @@ export function formatDuration(startIso: string, endIso: string): string {
 export function formatDistance(meters: number): string {
   const miles = meters / 1609.34;
   return miles < 0.1 ? `${Math.round(meters * 3.281)} ft` : `${miles.toFixed(1)} mi`;
+}
+
+// The same distance for screen readers, which read "mi" and "ft" as words.
+export function describeDistance(meters: number): string {
+  const miles = meters / 1609.34;
+  if (miles < 0.1) {
+    const feet = Math.round(meters * 3.281);
+    return `${feet} ${feet === 1 ? 'foot' : 'feet'} away`;
+  }
+  const rounded = miles.toFixed(1);
+  return `${rounded} ${rounded === '1.0' ? 'mile' : 'miles'} away`;
 }
 
 export const TIER_LABELS: Record<DifficultyTier, string> = {

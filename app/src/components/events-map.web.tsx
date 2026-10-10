@@ -9,7 +9,7 @@ export function EventsMap(_props: EventsMapProps) {
   return (
     <View style={styles.container}>
       <ThemedText themeColor="textSecondary" style={styles.text}>
-        The events map is available in the CleanPursuit mobile app.
+        The quest map is available in the CleanPursuit mobile app.
       </ThemedText>
     </View>
   );

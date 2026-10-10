@@ -21,7 +21,7 @@ export default function AppTabs() {
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="events">
-        <NativeTabs.Trigger.Label>Events</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>Quests</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/events.png')}
           renderingMode="template"

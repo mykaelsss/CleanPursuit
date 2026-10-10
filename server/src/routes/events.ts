@@ -154,7 +154,7 @@ async function findEvent(
 const eventRoutes: FastifyPluginAsyncZod = async (app) => {
   async function requireEvent(id: string, userId: string): Promise<EventDetail> {
     const event = await findEvent(app.db, app.storage, id, userId);
-    if (!event) throw new HttpError(404, 'EVENT_NOT_FOUND', 'Event not found');
+    if (!event) throw new HttpError(404, 'EVENT_NOT_FOUND', 'Party not found');
     return event;
   }
 
@@ -240,8 +240,8 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
         `SELECT (${OPEN_EVENT}) AS open FROM party p WHERE p.id = $1 AND p.scheduled_start IS NOT NULL`,
         [id],
       );
-      if (!rows[0]) throw new HttpError(404, 'EVENT_NOT_FOUND', 'Event not found');
-      if (!rows[0].open) throw new HttpError(409, 'EVENT_CLOSED', 'This event has ended or was cancelled');
+      if (!rows[0]) throw new HttpError(404, 'EVENT_NOT_FOUND', 'Party not found');
+      if (!rows[0].open) throw new HttpError(409, 'EVENT_CLOSED', 'This party has ended or was cancelled');
 
       await app.db.query(
         `INSERT INTO party_member (party_id, user_id) VALUES ($1, $2) ON CONFLICT (party_id, user_id) DO NOTHING`,
@@ -268,11 +268,11 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
       const { id } = request.params;
       const event = await requireEvent(id, request.user.id);
       if (event.isOrganizer) {
-        throw new HttpError(409, 'ORGANIZER_CANNOT_LEAVE', 'The organizer cannot leave their own event');
+        throw new HttpError(409, 'ORGANIZER_CANNOT_LEAVE', 'The party leader cannot leave their own party');
       }
       const me = event.attendees.find((a) => a.user.id === request.user.id);
       if (me?.status === 'checked_in') {
-        throw new HttpError(409, 'ALREADY_CHECKED_IN', 'You have already checked in to this event');
+        throw new HttpError(409, 'ALREADY_CHECKED_IN', 'You have already checked in to this party');
       }
 
       await app.db.query(`DELETE FROM party_member WHERE party_id = $1 AND user_id = $2 AND status = 'signed_up'`, [
@@ -312,11 +312,11 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
       const start = new Date(request.body.scheduledStart);
       const end = new Date(request.body.scheduledEnd);
       if (start.getTime() <= Date.now()) {
-        throw new HttpError(400, 'START_IN_PAST', 'The event must start in the future');
+        throw new HttpError(400, 'START_IN_PAST', 'The party must start in the future');
       }
-      if (end <= start) throw new HttpError(400, 'END_BEFORE_START', 'The event must end after it starts');
+      if (end <= start) throw new HttpError(400, 'END_BEFORE_START', 'The party must end after it starts');
       if (end.getTime() - start.getTime() > MAX_EVENT_HOURS * 3_600_000) {
-        throw new HttpError(400, 'EVENT_TOO_LONG', `Events can last at most ${MAX_EVENT_HOURS} hours`);
+        throw new HttpError(400, 'EVENT_TOO_LONG', `Parties can last at most ${MAX_EVENT_HOURS} hours`);
       }
 
       const { rows } = await app.db.query<{ status: string }>(`SELECT status FROM quest WHERE id = $1`, [

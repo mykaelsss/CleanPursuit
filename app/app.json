@@ -39,7 +39,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "CleanPursuit uses your location to show cleanup events near you."
+          "locationWhenInUsePermission": "CleanPursuit uses your location to show cleanup quests near you."
         }
       ]
     ],
