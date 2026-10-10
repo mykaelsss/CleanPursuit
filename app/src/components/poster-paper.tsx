@@ -4,6 +4,7 @@ import Svg, {
   ClipPath,
   Defs,
   G,
+  Image,
   Path,
   RadialGradient,
   Stop,
@@ -31,11 +32,12 @@ export default function PosterPaper({ width, height }: PosterPaperProps) {
 
   if (w <= 0 || h <= 0) return null;
 
+  // The canvas reaches past the poster on every side so the shadow fits.
   return (
     <Svg
-      width={w}
-      height={h}
-      viewBox={`0 0 ${w} ${h}`}
+      width={w + BLEED * 2}
+      height={h + BLEED * 2}
+      viewBox={`${-BLEED} ${-BLEED} ${w + BLEED * 2} ${h + BLEED * 2}`}
       style={styles.paper}
       pointerEvents="none"
     >
@@ -62,16 +64,22 @@ export default function PosterPaper({ width, height }: PosterPaperProps) {
         </RadialGradient>
       </Defs>
 
-      {/* A shadow under the paper, softened by stacking offset copies. */}
-      {SHADOW.map(([dx, dy, opacity]) => (
-        <Path
-          key={`${dx}-${dy}`}
-          d={art.fibers}
-          fill="#000"
-          opacity={opacity}
-          transform={`translate(${dx} ${dy})`}
-        />
-      ))}
+      {/* The paper lifts off the board a little, so it casts a soft shadow.
+          Wider, fainter strokes around the shape blur its edge. */}
+      <G transform={`translate(${SHADOW_OFFSET[0]} ${SHADOW_OFFSET[1]})`}>
+        <Path d={art.fibers} fill="#000" opacity={0.14} />
+        {SHADOW_BLUR.map(([strokeWidth, opacity]) => (
+          <Path
+            key={`shadow-${strokeWidth}`}
+            d={art.fibers}
+            fill="none"
+            stroke="#000"
+            strokeWidth={strokeWidth}
+            strokeOpacity={opacity}
+            strokeLinejoin="round"
+          />
+        ))}
+      </G>
 
       {/* Pale fibers show along the tear, where the paper split. */}
       <Path d={art.fibers} fill={theme.posterFiber} />
@@ -115,36 +123,15 @@ export default function PosterPaper({ width, height }: PosterPaperProps) {
           />
         ))}
 
-        {art.facets.map((facet, i) => (
-          <Path
-            key={`facet-${i}`}
-            d={facet.d}
-            fill={facet.light ? "#FFF" : "#000"}
-            opacity={facet.opacity}
-          />
-        ))}
-
-        {art.creases.map((crease, i) => (
-          <G key={`crease-${i}`} opacity={crease.opacity}>
-            <Path
-              d={crease.d}
-              fill="none"
-              stroke="#000"
-              strokeOpacity={0.09}
-              strokeWidth={0.7}
-              strokeLinecap="round"
-            />
-            <Path
-              d={crease.d}
-              fill="none"
-              stroke="#FFF"
-              strokeOpacity={0.22}
-              strokeWidth={0.9}
-              strokeLinecap="round"
-              transform="translate(0.7 0.7)"
-            />
-          </G>
-        ))}
+        {/* Light wrinkling: shading baked by scripts/generate-paper-texture.mjs. */}
+        <Image
+          href={WRINKLES}
+          x={0}
+          y={0}
+          width={w}
+          height={h}
+          preserveAspectRatio="xMidYMid slice"
+        />
 
         {art.flecks.map((fleck, i) => (
           <Path
@@ -159,11 +146,18 @@ export default function PosterPaper({ width, height }: PosterPaperProps) {
   );
 }
 
-// [x offset, y offset, opacity] for each layer of the shadow.
-const SHADOW = [
-  [1, 2, 0.08],
-  [2, 4, 0.06],
-  [3, 7, 0.04],
+const WRINKLES = require("@/assets/images/paper-crumple.png");
+
+// Room around the poster for its shadow, in pixels.
+const BLEED = 16;
+const SHADOW_OFFSET = [2, 5] as const;
+// [stroke width, opacity] for each step of the shadow's blurred edge.
+const SHADOW_BLUR = [
+  [18, 0.025],
+  [13, 0.03],
+  [9, 0.035],
+  [5, 0.04],
+  [2, 0.05],
 ] as const;
 
 // [stroke width, opacity] for each band of darkening along the edge.
@@ -184,7 +178,7 @@ const EDGE_SOAK = [
   [2, 0.16],
 ] as const;
 
-// Fixed so the paper keeps its look; change it for a different crumple.
+// Fixed so the paper keeps its look; change it for a different tear and stains.
 const PAPER_SEED = 1871;
 
 // Spacing of the points along each edge.
@@ -263,14 +257,12 @@ function drawPaper(w: number, h: number) {
     opacity: 0.6 + random() * 0.4,
   }));
 
-  const { facets, creases } = crumple(random, w, h);
-
   const flecks = Array.from({ length: Math.round((w * h) / 900) }, () => ({
     d: blob(random, random() * w, random() * h, 0.3 + random() * 0.9),
     opacity: 0.1 + random() * 0.3,
   }));
 
-  return { paper, fibers, blotches, tides, facets, creases, flecks };
+  return { paper, fibers, blotches, tides, flecks };
 }
 
 // How far an edge sits in from the poster's bounds at each point along it.
@@ -312,64 +304,6 @@ function blob(random: () => number, cx: number, cy: number, radius: number) {
     points.push([cx + Math.cos(angle) * r, cy + Math.sin(angle) * r * squash]);
   }
   return toPath(points);
-}
-
-// Crumpled paper catches light in flat facets split by creases.
-// The facets come from a jittered grid cut into triangles, and some of the
-// grid lines are drawn as creases so the shading and the creases agree.
-function crumple(random: () => number, w: number, h: number) {
-  const cols = 4;
-  const rows = Math.max(4, Math.round((h / w) * cols));
-  const grid = Array.from({ length: rows + 1 }, (_, r) =>
-    Array.from({ length: cols + 1 }, (_, c): [number, number] => {
-      const inside = r > 0 && r < rows && c > 0 && c < cols;
-      const jitter = () => (inside ? (random() - 0.5) * 0.7 : 0);
-      return [((c + jitter()) / cols) * w, ((r + jitter()) / rows) * h];
-    }),
-  );
-  const at = (r: number, c: number) => grid[r]?.[c] ?? [0, 0];
-
-  const facets: { d: string; light: boolean; opacity: number }[] = [];
-  const creases: { d: string; opacity: number }[] = [];
-  const facet = (points: [number, number][]) =>
-    facets.push({
-      d: toPath(points),
-      light: random() < 0.5,
-      opacity: 0.01 + random() * 0.035,
-    });
-
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const [a, b, d, e] = [at(r, c), at(r, c + 1), at(r + 1, c + 1), at(r + 1, c)];
-      if (random() < 0.5) {
-        facet([a, b, d]);
-        facet([a, d, e]);
-        if (random() < 0.25) creases.push(crease(random, a, d));
-      } else {
-        facet([a, b, e]);
-        facet([b, d, e]);
-        if (random() < 0.25) creases.push(crease(random, b, e));
-      }
-      if (c > 0 && random() < 0.15) creases.push(crease(random, a, e));
-      if (r > 0 && random() < 0.15) creases.push(crease(random, a, b));
-    }
-  }
-  return { facets, creases };
-}
-
-// A crease bends a little along its length rather than running dead straight.
-function crease(
-  random: () => number,
-  [x1, y1]: [number, number],
-  [x2, y2]: [number, number],
-) {
-  const bend = () => (random() - 0.5) * 6;
-  const mx = (x1 + x2) / 2 + bend();
-  const my = (y1 + y2) / 2 + bend();
-  return {
-    d: `M${n(x1)} ${n(y1)} L${n(mx)} ${n(my)} L${n(x2)} ${n(y2)}`,
-    opacity: 0.4 + random() * 0.6,
-  };
 }
 
 // Smooth 1D noise: the sum of value noise at each [period, amplitude].
@@ -426,7 +360,7 @@ function n(value: number) {
 const styles = StyleSheet.create({
   paper: {
     position: "absolute",
-    top: 0,
-    left: 0,
+    top: -BLEED,
+    left: -BLEED,
   },
 });
