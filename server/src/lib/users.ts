@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { levelFor, levelSchema } from './levels.ts';
 
 // The user fields the API may return. Never add password_hash here.
 export const userSchema = z.object({
@@ -6,6 +7,7 @@ export const userSchema = z.object({
   username: z.string(),
   email: z.string(),
   totalXp: z.number().int(),
+  level: levelSchema,
   createdAt: z.iso.datetime(),
 });
 
@@ -27,9 +29,10 @@ export function toUser(row: UserRow): User {
     username: row.username,
     email: row.email,
     totalXp: row.total_xp,
+    level: levelFor(row.total_xp),
     createdAt: row.created_at.toISOString(),
   };
 }
 
-// How other resources refer to a user: no email or XP.
+// How other resources refer to a user: no email, XP or level.
 export const userSummarySchema = userSchema.pick({ id: true, username: true });

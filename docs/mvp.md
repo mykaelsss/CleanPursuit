@@ -185,6 +185,36 @@ stateDiagram-v2
 
 The exact numbers (base rate, tier multipliers, cap, hotspot threshold) are still open.
 
+### Levels
+
+Levels come from a user's all-time XP, so they are computed by the API and never stored.
+There are 15 levels.
+Going from level 1 to 2 takes 1,000 XP, and each level after takes 1.2 times the one before, rounded to the nearest 100 XP.
+The last level costs about ten times the first, and reaching level 15 takes 59,200 XP in total.
+The numbers live in `server/src/lib/levels.ts`.
+
+| Level | XP to reach it | XP this level takes to finish |
+| --- | --- | --- |
+| 1 | 0 | 1,000 |
+| 2 | 1,000 | 1,200 |
+| 3 | 2,200 | 1,400 |
+| 4 | 3,600 | 1,700 |
+| 5 | 5,300 | 2,100 |
+| 6 | 7,400 | 2,500 |
+| 7 | 9,900 | 3,000 |
+| 8 | 12,900 | 3,600 |
+| 9 | 16,500 | 4,300 |
+| 10 | 20,800 | 5,200 |
+| 11 | 26,000 | 6,200 |
+| 12 | 32,200 | 7,400 |
+| 13 | 39,600 | 8,900 |
+| 14 | 48,500 | 10,700 |
+| 15 | 59,200 | Max level |
+
+The curve is tuned for a typical cleanup earning a few hundred XP, so a regular volunteer reaches the middle levels in a few months and level 15 takes well over a hundred cleanups.
+Revisit it when the XP base rate is set.
+XP keeps counting past level 15 for the leaderboards.
+
 ## Tiger Data features
 
 - **Activity log.** One append-only hypertable records reports, check-ins, party ends, XP and bonuses, with `user_id`, `guild_id` and `area_id` on every row.

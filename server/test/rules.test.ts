@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { difficultyTier } from '../src/lib/difficulty.ts';
 import { newUploadKey, parseUploadKey } from '../src/lib/files.ts';
 import { detectImageType } from '../src/lib/images.ts';
+import { LEVEL_START_XP, levelFor, MAX_LEVEL } from '../src/lib/levels.ts';
 import { isSensibleRange, sensibleRange, tierGallons, volumeEstimate } from '../src/lib/volume.ts';
 
 test('difficulty tier follows the documented rules', () => {
@@ -79,4 +80,21 @@ test('upload keys round-trip and reject anything the API did not issue', () => {
   assert.equal(parseUploadKey(`users/${userId}/../../secret.jpg`), null);
   assert.equal(parseUploadKey(`users/${userId}/01990000-0000-7000-8000-000000000001.gif`), null);
   assert.equal(parseUploadKey('photo.jpg'), null);
+});
+
+test('levels grow by 1.2x per level from 1000 XP, up to level 15', () => {
+  // Keep in sync with the table in docs/mvp.md.
+  assert.deepEqual(
+    LEVEL_START_XP,
+    [0, 1000, 2200, 3600, 5300, 7400, 9900, 12900, 16500, 20800, 26000, 32200, 39600, 48500, 59200],
+  );
+  assert.equal(LEVEL_START_XP.length, MAX_LEVEL);
+
+  assert.deepEqual(levelFor(0), { number: 1, xpIntoLevel: 0, xpForNextLevel: 1000 });
+  assert.deepEqual(levelFor(999), { number: 1, xpIntoLevel: 999, xpForNextLevel: 1000 });
+  assert.deepEqual(levelFor(1000), { number: 2, xpIntoLevel: 0, xpForNextLevel: 1200 });
+  assert.deepEqual(levelFor(3000), { number: 3, xpIntoLevel: 800, xpForNextLevel: 1400 });
+  assert.deepEqual(levelFor(59199), { number: 14, xpIntoLevel: 10699, xpForNextLevel: 10700 });
+  assert.deepEqual(levelFor(59200), { number: 15, xpIntoLevel: 0, xpForNextLevel: null });
+  assert.deepEqual(levelFor(100000), { number: 15, xpIntoLevel: 40800, xpForNextLevel: null });
 });
