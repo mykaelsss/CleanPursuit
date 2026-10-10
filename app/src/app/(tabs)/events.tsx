@@ -36,7 +36,6 @@ import { ApiError, type EventDetail, type NearbyEvent } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { describeDistance, describeEventTime, formatDistance, formatEventTime, TIER_LABELS } from '@/lib/event-format';
 import { isInNyc, NYC_REGION } from '@/lib/nyc';
-import { isSampleEvent, sampleEvents, setSampleAttendance, type SampleEvent } from '@/lib/sample-events';
 
 type Point = { latitude: number; longitude: number };
 
@@ -72,7 +71,7 @@ function focus(ref: RefObject<Text | null>) {
 }
 
 export default function EventsScreen() {
-  const { authedRequest, user } = useAuth();
+  const { authedRequest } = useAuth();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -85,8 +84,6 @@ export default function EventsScreen() {
   const [mapCenter, setMapCenter] = useState<Point | null>(null);
   const [events, setEvents] = useState<NearbyEvent[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
-  // Development only: placeholder events shown while the API has none, so the layout can be seen.
-  const [samples, setSamples] = useState<SampleEvent[] | null>(null);
   const [listIndex, setListIndex] = useState(0);
   const [listPlaced, setListPlaced] = useState(false);
   const [screenHeight, setScreenHeight] = useState(windowHeight);
@@ -129,14 +126,10 @@ export default function EventsScreen() {
       );
       setEvents(events);
       setListError(null);
-      setSamples((current) => (__DEV__ && events.length === 0 && user ? (current ?? sampleEvents(center, user)) : null));
     } catch (err) {
       setListError(errorMessage(err));
-      if (__DEV__ && user) setSamples((current) => current ?? sampleEvents(center, user));
     }
-  }, [authedRequest, search, user]);
-
-  const shown: NearbyEvent[] | null = samples ?? events;
+  }, [authedRequest, search]);
 
   // Reload when the tab is opened, so new events and attendee counts show up.
   useFocusEffect(
@@ -152,10 +145,6 @@ export default function EventsScreen() {
       setDetail(null);
       setCardError(null);
       cardSheet.current?.snapToIndex(0);
-      if (isSampleEvent(id)) {
-        setDetail(samples?.find((e) => e.id === id) ?? null);
-        return;
-      }
       try {
         const loaded = await authedRequest<EventDetail>(`/events/${id}`);
         // Ignore a slow response for an event the user has already moved away from.
@@ -164,7 +153,7 @@ export default function EventsScreen() {
         if (selectedRef.current === id) setCardError(errorMessage(err));
       }
     },
-    [authedRequest, samples],
+    [authedRequest],
   );
 
   // Move screen reader focus with the selection, once the list is shown or hidden again: to the new title
@@ -210,15 +199,6 @@ export default function EventsScreen() {
   async function changeAttendance(method: 'POST' | 'DELETE') {
     if (!selectedId) return;
     const joining = method === 'POST';
-    if (isSampleEvent(selectedId)) {
-      const sample = samples?.find((e) => e.id === selectedId);
-      if (!sample || !user) return;
-      const updated = setSampleAttendance(sample, user, joining);
-      setSamples((list) => list?.map((e) => (e.id === updated.id ? updated : e)) ?? null);
-      setDetail(updated);
-      AccessibilityInfo.announceForAccessibility(joining ? 'You joined the party' : 'You left the party');
-      return;
-    }
     setBusy(true);
     setCardError(null);
     try {
@@ -238,7 +218,7 @@ export default function EventsScreen() {
     }
   }
 
-  const selected = detail ?? shown?.find((e) => e.id === selectedId) ?? null;
+  const selected = detail ?? events?.find((e) => e.id === selectedId) ?? null;
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -296,7 +276,7 @@ export default function EventsScreen() {
         accessibilityElementsHidden={isCardOpen}
         importantForAccessibility={isCardOpen ? 'no-hide-descendants' : 'auto'}>
         <EventsMap
-          events={shown ?? []}
+          events={events ?? []}
           selectedId={selectedId}
           onSelect={select}
           center={mapCenter}
@@ -313,7 +293,7 @@ export default function EventsScreen() {
           onChange={onListChange}
           handleComponent={renderListHandle}>
           <BottomSheetFlatList
-            data={shown ?? []}
+            data={events ?? []}
             keyExtractor={(event: NearbyEvent) => event.id}
             renderItem={renderItem}
             contentContainerStyle={styles.list}
@@ -326,19 +306,10 @@ export default function EventsScreen() {
                   style={[displayStyles.base, styles.listTitle]}>
                   Quests near you
                 </ThemedText>
-                {shown && shown.length > 0 ? (
+                {events && events.length > 0 ? (
                   <ThemedText type="small" themeColor="textSecondary">
-                    {shown.length} {shown.length === 1 ? 'quest' : 'quests'} to join
+                    {events.length} {events.length === 1 ? 'quest' : 'quests'} to join
                   </ThemedText>
-                ) : null}
-                {samples ? (
-                  <View style={[styles.sampleBanner, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]} accessible>
-                    <ThemedText type="smallBold">Sample quests</ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary">
-                      Placeholders for the layout, shown in development until real quests exist.
-                      {listError ? ` (${listError})` : ''}
-                    </ThemedText>
-                  </View>
                 ) : null}
               </View>
             }
@@ -510,13 +481,6 @@ const styles = StyleSheet.create({
   },
   listHeader: {
     paddingBottom: Spacing.three,
-  },
-  sampleBanner: {
-    marginTop: Spacing.two,
-    padding: Spacing.two + Spacing.one,
-    borderRadius: Spacing.two + Spacing.one,
-    borderWidth: 1,
-    gap: Spacing.half,
   },
   listTitle: {
     fontSize: 26,

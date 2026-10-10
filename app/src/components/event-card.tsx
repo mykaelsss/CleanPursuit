@@ -208,8 +208,7 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
   );
 }
 
-// The site photo in a frame of its difficulty color, like loot of that rarity, or a tinted placeholder
-// when there is no photo (sample quests).
+// The site photo in a frame of its difficulty color, like loot of that rarity, tinted while it loads.
 // Pass `label` to describe the photo to screen readers. Leave it out when the photo only decorates
 // something that is already labeled, such as a list row, so it is skipped.
 export function SitePhoto({
@@ -224,24 +223,13 @@ export function SitePhoto({
   label?: string;
 }) {
   const colors = useTierColors(tier);
-  const hasPhoto = !!photo.url;
   const a11y = label
-    ? ({
-        accessible: true,
-        accessibilityRole: 'image',
-        accessibilityLabel: hasPhoto ? label : 'No photo of the site yet',
-      } as const)
+    ? ({ accessible: true, accessibilityRole: 'image', accessibilityLabel: label } as const)
     : ({ accessible: false, accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' } as const);
 
   return (
     <View style={[styles.frame, style, { borderColor: colors.fill, backgroundColor: colors.soft }]} {...a11y}>
-      {hasPhoto ? (
-        <Image source={{ uri: photo.url, cacheKey: photo.id }} style={StyleSheet.absoluteFill} contentFit="cover" />
-      ) : (
-        <ThemedText type="smallBold" style={[styles.placeholderText, { color: colors.onSoft }]}>
-          No photo yet
-        </ThemedText>
-      )}
+      <Image source={{ uri: photo.url, cacheKey: photo.id }} style={StyleSheet.absoluteFill} contentFit="cover" />
     </View>
   );
 }
@@ -300,12 +288,6 @@ const styles = StyleSheet.create({
   frame: {
     borderWidth: 3,
     overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeholderText: {
-    textAlign: 'center',
-    paddingHorizontal: Spacing.one,
   },
   photo: {
     height: 190,

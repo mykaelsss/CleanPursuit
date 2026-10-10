@@ -44,6 +44,7 @@ app/                    React Native app (Expo)
 server/src/             Fastify API
 server/test/            API tests
 server/db/migrations/   Numbered SQL migrations, applied in order
+server/db/seed/         Photos for the demo data script
 scripts/phone.sh        Runs the API and app for Expo Go on a phone, over tunnels
 docs/mvp.md             Product summary: scope, core loop, XP rules, risks
 docs/database.md        Database design: tables, relationships, aggregates
@@ -118,6 +119,23 @@ infisical run -- sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/db/mig
 
 The single quotes matter: `$DATABASE_URL` must expand inside the command Infisical runs, not in your shell.
 Applied migrations are never edited; changes go in a new numbered file.
+
+### Load demo data
+
+```bash
+cd server
+infisical run -- npm run seed:demo
+```
+
+This creates 26 demo users and 11 cleanup events across the five boroughs, each with a report, a photo and a quest.
+One event is under way and the rest start over the next week, at set hours in New York time.
+Sign in as `demo` with the password `cleanpursuit-demo`: that account leads the Prospect Park event and has joined the Meadow Lake and Jamaica Avenue ones.
+Every other demo user has the same password.
+
+Rerun it shortly before a demo.
+Each run deletes what the demo accounts created (including parties other users scheduled on demo quests) and recreates it, so event times stay current.
+Demo accounts are the ones with an `@demo.example.com` email, and they keep their ids, so the app stays signed in across runs.
+The photos are in `server/db/seed/photos/`, credited in its `CREDITS.md`.
 
 ## Auth
 
