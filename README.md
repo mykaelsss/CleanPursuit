@@ -24,7 +24,7 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 | --- | --- |
 | Database | Migrations 001 and 002 applied to the DEV Tiger Data service |
 | App | Expo starter project in `app/` |
-| API | Fastify scaffold in `server/` with a health check |
+| API | Fastify in `server/` with a health check and auth (register, login, refresh, logout, `/me`) |
 
 ## Tech stack
 
@@ -74,8 +74,10 @@ Before committing, run:
 
 ```bash
 npm run typecheck
-npm test
+infisical run -- npm test
 ```
+
+Plain `npm test` also works, but it skips the tests that need the database.
 
 Without Infisical, copy `server/.env.example` to `server/.env` and fill it in; `npm run dev` loads it automatically.
 
@@ -103,9 +105,24 @@ infisical run -- sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/db/mig
 The single quotes matter: `$DATABASE_URL` must expand inside the command Infisical runs, not in your shell.
 Applied migrations are never edited; changes go in a new numbered file.
 
+## Auth
+
+The API handles accounts itself.
+
+- `POST /auth/register` and `POST /auth/login` return the user, an access token and a refresh token.
+- Send the access token as `Authorization: Bearer <token>`.
+  It lasts 15 minutes.
+- When a request fails with code `ACCESS_TOKEN_EXPIRED`, call `POST /auth/refresh` with the refresh token to get a new pair.
+- Refresh tokens last 30 days and work once.
+  Reusing an old one signs the user out on every device, so the app must never send two refreshes at the same time.
+- `POST /auth/logout` revokes a refresh token.
+- In the app, keep the refresh token in `expo-secure-store` and the access token in memory only.
+
+Passwords are hashed with argon2id, and login, registration and refresh are rate limited to 10 requests per minute per IP.
+
 ## Secrets
 
-All secrets live in Infisical: the database connection string, JWT keys, R2 credentials and the Gemini key.
+All secrets live in Infisical: the database connection string, the JWT secret, R2 credentials and the Gemini key.
 Never commit `.env` files; the root `.gitignore` excludes every `.env` file except `.env.example`.
 `server/.env.example` lists the variable names the API reads, and `server/src/env.ts` checks them at startup.
 

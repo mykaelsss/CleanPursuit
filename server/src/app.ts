@@ -1,5 +1,7 @@
+import { STATUS_CODES } from 'node:http';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyError, type FastifyServerOptions } from 'fastify';
@@ -11,8 +13,12 @@ import {
 } from 'fastify-type-provider-zod';
 import type pg from 'pg';
 import type { Env } from './env.ts';
+import { HttpError } from './lib/errors.ts';
+import auth from './plugins/auth.ts';
 import db from './plugins/db.ts';
+import authRoutes from './routes/auth.ts';
 import healthRoutes from './routes/health.ts';
+import meRoutes from './routes/me.ts';
 
 export interface BuildAppOptions {
   env: Env;
@@ -47,7 +53,7 @@ export async function buildApp({ env, pool }: BuildAppOptions) {
     return reply.status(statusCode).send({
       statusCode,
       code: error.code,
-      error: error.name,
+      error: STATUS_CODES[statusCode] ?? 'Error',
       message: error.message,
     });
   });
@@ -55,17 +61,29 @@ export async function buildApp({ env, pool }: BuildAppOptions) {
   await app.register(helmet);
   // The app authenticates with bearer tokens, not cookies, so any origin is safe; only Expo web needs this.
   await app.register(cors);
+  // Off by default; routes opt in with `config: { rateLimit }`.
+  await app.register(rateLimit, {
+    global: false,
+    errorResponseBuilder: (_request, { after }) =>
+      new HttpError(429, 'RATE_LIMITED', `Too many requests; try again in ${after}`),
+  });
 
   if (env.NODE_ENV !== 'production') {
     await app.register(swagger, {
-      openapi: { info: { title: 'CleanPursuit API', version: '0.1.0' } },
+      openapi: {
+        info: { title: 'CleanPursuit API', version: '0.1.0' },
+        components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } } },
+      },
       transform: jsonSchemaTransform,
     });
     await app.register(swaggerUi, { routePrefix: '/docs', staticCSP: true });
   }
 
   await app.register(db, { pool });
+  await app.register(auth, { jwtSecret: env.JWT_SECRET });
   await app.register(healthRoutes);
+  await app.register(authRoutes);
+  await app.register(meRoutes);
 
   return app;
 }

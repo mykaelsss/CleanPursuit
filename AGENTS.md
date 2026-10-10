@@ -29,8 +29,9 @@ Only the party leader ends a party, and XP goes to checked-in members when it en
 
 - `app/`: React Native app (Expo). Has its own `AGENTS.md` with Expo guidance.
 - `server/src/`: Fastify API.
-  `app.ts` builds the app, `server.ts` starts it, `env.ts` validates environment variables, `plugins/` holds shared plugins, `routes/` holds one plugin per resource.
+  `app.ts` builds the app, `server.ts` starts it, `env.ts` validates environment variables, `plugins/` holds shared plugins, `routes/` holds one plugin per resource, and `lib/` holds shared helpers.
 - `server/test/`: API tests using `node:test` and `app.inject()`.
+  Tests that need the database skip themselves unless `DATABASE_URL` is set, so run `infisical run -- npm test` to include them.
 - `server/db/migrations/`: numbered SQL migrations, applied in order.
 - `docs/`: product and database docs.
 
@@ -41,13 +42,15 @@ Only the party leader ends a party, and XP goes to checked-in members when it en
 - Every route declares Zod schemas for its input and every response status, so undeclared fields such as password hashes never leave the API.
 - Write plain parameterized SQL through `app.db` (a `pg` pool); no ORM.
 - Shared plugins are wrapped in `fastify-plugin`; route plugins are not.
+- Protect a route with `onRequest: app.authenticate` and `security: [{ bearerAuth: [] }]`, then read the user id from `request.user.id`.
+- Throw `HttpError` with a stable `code` for expected failures, and declare those statuses with `errorSchema`.
 - Add new environment variables to `src/env.ts` and `.env.example` in the same change.
-- Run `npm run typecheck` and `npm test` in `server/` before committing.
+- Run `npm run typecheck` and `infisical run -- npm test` in `server/` before committing.
 
 ## Rules
 
 - Never edit an applied migration; add a new numbered one.
-- Secrets (database URL, JWT keys, R2 and Gemini keys) live in Infisical, never in the repo.
+- Secrets (database URL, JWT secret, R2 and Gemini keys) live in Infisical, never in the repo.
 - Never commit `.env` files; keep them in `.gitignore` and commit a `.env.example` that lists variable names only.
 - Never give sharps or biohazard handling instructions in app copy; point to drop-off and escalation.
 - Use a plain dash "-", never an em dash.

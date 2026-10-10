@@ -1,6 +1,6 @@
-import pg from 'pg';
 import { buildApp } from './app.ts';
 import { type Env, loadEnv } from './env.ts';
+import { createPool } from './lib/db.ts';
 
 let env: Env;
 try {
@@ -11,11 +11,7 @@ try {
   process.exit(1);
 }
 
-// Read sslmode the way psql and Tiger's docs do. Without this, pg treats `require` as `verify-full`,
-// which rejects Tiger's certificate because it is signed by Timescale's own CA.
-const databaseUrl = new URL(env.DATABASE_URL);
-databaseUrl.searchParams.set('uselibpqcompat', 'true');
-const pool = new pg.Pool({ connectionString: databaseUrl.toString() });
+const pool = createPool(env.DATABASE_URL);
 const app = await buildApp({ env, pool });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

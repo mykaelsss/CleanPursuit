@@ -7,6 +7,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
+  // Signs access tokens. Generate with `openssl rand -base64 32`.
+  JWT_SECRET: z.string().min(32, 'Use at least 32 characters, for example from `openssl rand -base64 32`'),
 });
 
 export type Env = z.infer<typeof envSchema>;
