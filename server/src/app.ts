@@ -19,6 +19,7 @@ import auth from './plugins/auth.ts';
 import db from './plugins/db.ts';
 import storage from './plugins/storage.ts';
 import authRoutes from './routes/auth.ts';
+import eventRoutes from './routes/events.ts';
 import fileRoutes from './routes/files.ts';
 import healthRoutes from './routes/health.ts';
 import meRoutes from './routes/me.ts';
@@ -94,6 +95,7 @@ export async function buildApp({ env, pool, storage: objectStorage }: BuildAppOp
   await app.register(fileRoutes);
   await app.register(reportRoutes);
   await app.register(questRoutes);
+  await app.register(eventRoutes);
 
   return app;
 }
