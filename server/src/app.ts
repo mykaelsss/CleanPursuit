@@ -24,6 +24,7 @@ import healthRoutes from './routes/health.ts';
 import meRoutes from './routes/me.ts';
 import questRoutes from './routes/quests.ts';
 import reportRoutes from './routes/reports.ts';
+import partiesRoutes from './routes/parties.ts';
 
 export interface BuildAppOptions {
   env: Env;
@@ -94,6 +95,7 @@ export async function buildApp({ env, pool, storage: objectStorage }: BuildAppOp
   await app.register(fileRoutes);
   await app.register(reportRoutes);
   await app.register(questRoutes);
+  await app.register(partiesRoutes);
 
   return app;
 }
