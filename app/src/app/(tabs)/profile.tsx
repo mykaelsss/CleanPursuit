@@ -12,7 +12,6 @@ export default function ProfileScreen() {
 
   const player = {
     name: "Staceyann King",
-    location: "Queens, NY",
     initials: "SK",
     title: "Neighborhood Explorer",
     level: 1,
@@ -44,8 +43,6 @@ export default function ProfileScreen() {
       <View style={styles.playerHeading}>
         <View style={styles.details}>
           <ThemedText type="subtitle">{player.name}</ThemedText>
-
-          <ThemedText themeColor="textSecondary">{player.location}</ThemedText>
         </View>
 
         <AppBadge label={`LEVEL ${player.level}`} />
