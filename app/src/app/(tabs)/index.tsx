@@ -21,6 +21,20 @@ export default function HomeScreen() {
           <ThemedText type="subtitle">{user?.totalXp ?? 0}</ThemedText>
         </ThemedView>
 
+        {user && (
+          <ThemedView type="backgroundElement" style={styles.card}>
+            <ThemedText type="small" themeColor="textSecondary">
+              Level
+            </ThemedText>
+            <ThemedText type="subtitle">{user.level.number}</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {user.level.xpForNextLevel === null
+                ? 'Max level'
+                : `${user.level.xpIntoLevel} / ${user.level.xpForNextLevel} XP to level ${user.level.number + 1}`}
+            </ThemedText>
+          </ThemedView>
+        )}
+
         <Pressable
           onPress={signOut}
           accessibilityRole="button"

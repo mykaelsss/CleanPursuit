@@ -124,6 +124,7 @@ Applied migrations are never edited; changes go in a new numbered file.
 The API handles accounts itself.
 
 - `POST /auth/register` and `POST /auth/login` return the user, an access token and a refresh token.
+  The user includes `totalXp` and `level` (`number`, `xpIntoLevel` and `xpForNextLevel`, which is null at the max level); see [Levels](docs/mvp.md#levels).
 - Send the access token as `Authorization: Bearer <token>`.
   It lasts 15 minutes.
 - When a request fails with code `ACCESS_TOKEN_EXPIRED`, call `POST /auth/refresh` with the refresh token to get a new pair.

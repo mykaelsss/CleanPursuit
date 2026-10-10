@@ -40,6 +40,7 @@ describe('auth', { skip }, () => {
     const body = res.json();
     assert.equal(body.user.username, user.username);
     assert.equal(body.user.totalXp, 0);
+    assert.deepEqual(body.user.level, { number: 1, xpIntoLevel: 0, xpForNextLevel: 1000 });
     assert.equal(body.tokenType, 'Bearer');
     assert.equal(body.expiresIn, 900);
     assert.equal('passwordHash' in body.user || 'password_hash' in body.user, false);
