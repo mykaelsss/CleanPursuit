@@ -2,9 +2,9 @@ import { StyleSheet, View } from "react-native";
 
 import AppBadge from "@/components/app-badge";
 import AppCard from "@/components/app-card";
+import BountyPoster from "@/components/bounty-poster";
 import ScreenLayout from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
 import { useTheme } from "@/hooks/use-theme";
 
 export default function ProfileScreen() {
@@ -28,16 +28,12 @@ export default function ProfileScreen() {
     <ScreenLayout
       title="Profile"
       headerContent={
-        <ThemedView
-          type="backgroundElement"
-          style={[styles.profilePicture, { borderColor: theme.earth }]}
-        >
-          <ThemedText type="subtitle">{player.initials}</ThemedText>
-
-          <ThemedText type="small" themeColor="textSecondary">
-            {player.title}
-          </ThemedText>
-        </ThemedView>
+        <BountyPoster
+          name={player.name}
+          initials={player.initials}
+          title={player.title}
+          bounty={player.xp}
+        />
       }
     >
       <View style={styles.playerHeading}>
@@ -97,16 +93,6 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  profilePicture: {
-    width: "100%",
-    height: 220,
-    borderRadius: 20,
-    borderWidth: 2,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    overflow: "hidden",
-  },
   playerHeading: {
     flexDirection: "row",
     flexWrap: "wrap",

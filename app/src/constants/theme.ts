@@ -34,6 +34,11 @@ export const Colors = {
 
     badge: '#8DD9C0',
     onBadge: '#243B35',
+
+    poster: '#EBDFC4',
+    posterFiber: '#F8F2E4',
+    posterInk: '#3B2B20',
+    posterPhoto: '#D9CBAE',
   },
   dark: {
     text: '#F3FAFF',
@@ -65,6 +70,11 @@ export const Colors = {
 
     badge: '#8DD9C0',
     onBadge: '#243B35',
+
+    poster: '#EBDFC4',
+    posterFiber: '#F8F2E4',
+    posterInk: '#3B2B20',
+    posterPhoto: '#D9CBAE',
   },
 } as const;
 
