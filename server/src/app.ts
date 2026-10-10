@@ -25,6 +25,7 @@ import meRoutes from './routes/me.ts';
 import questRoutes from './routes/quests.ts';
 import reportRoutes from './routes/reports.ts';
 import partiesRoutes from './routes/parties.ts';
+import leaderboardRoutes from './routes/leaderboards.ts';
 
 export interface BuildAppOptions {
   env: Env;
@@ -96,6 +97,7 @@ export async function buildApp({ env, pool, storage: objectStorage }: BuildAppOp
   await app.register(reportRoutes);
   await app.register(questRoutes);
   await app.register(partiesRoutes);
+  await app.register(leaderboardRoutes);
 
   return app;
 }
