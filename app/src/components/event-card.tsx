@@ -40,19 +40,22 @@ interface EventCardProps {
 export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose, titleRef }: EventCardProps) {
   const theme = useTheme();
   const leaderTag = useTierColors('legendary');
-  // Keyed by event, so switching events never shows the previous event's address.
-  const [resolved, setResolved] = useState<{ eventId: string; address: string } | null>(null);
-  const address = resolved?.eventId === event.id ? resolved.address : null;
+  // Older reports have no place name, so look up an address. Keyed by event, so switching
+  // events never shows the previous event's address.
+  const [resolved, setResolved] = useState<{ eventId: string; address: string | null } | null>(null);
+  const lookup = resolved?.eventId === event.id ? resolved : null;
+  const where = event.placeName ?? (lookup ? (lookup.address ?? 'Pinned on the map') : 'Finding address…');
   const partySize = detail?.attendeeCount ?? event.attendeeCount;
   const duration = formatDuration(event.scheduledStart, event.scheduledEnd);
 
   useEffect(() => {
+    if (event.placeName) return;
     let current = true;
     lookupAddress(event.location).then((a) => current && setResolved({ eventId: event.id, address: a }));
     return () => {
       current = false;
     };
-  }, [event.id, event.location]);
+  }, [event.id, event.location, event.placeName]);
 
   return (
     <View style={styles.container}>
@@ -151,7 +154,7 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
       ) : null}
 
       <View style={styles.facts}>
-        <Fact label="Where" value={address ?? 'Finding address…'} />
+        <Fact label="Where" value={where} />
         <Fact
           label="When"
           value={`${formatEventTime(event.scheduledStart, event.scheduledEnd)} (${duration})`}
@@ -208,8 +211,7 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
   );
 }
 
-// The site photo in a frame of its difficulty color, like loot of that rarity, or a tinted placeholder
-// when there is no photo (sample quests).
+// The site photo in a frame of its difficulty color, like loot of that rarity, tinted while it loads.
 // Pass `label` to describe the photo to screen readers. Leave it out when the photo only decorates
 // something that is already labeled, such as a list row, so it is skipped.
 export function SitePhoto({
@@ -224,24 +226,13 @@ export function SitePhoto({
   label?: string;
 }) {
   const colors = useTierColors(tier);
-  const hasPhoto = !!photo.url;
   const a11y = label
-    ? ({
-        accessible: true,
-        accessibilityRole: 'image',
-        accessibilityLabel: hasPhoto ? label : 'No photo of the site yet',
-      } as const)
+    ? ({ accessible: true, accessibilityRole: 'image', accessibilityLabel: label } as const)
     : ({ accessible: false, accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' } as const);
 
   return (
     <View style={[styles.frame, style, { borderColor: colors.fill, backgroundColor: colors.soft }]} {...a11y}>
-      {hasPhoto ? (
-        <Image source={{ uri: photo.url, cacheKey: photo.id }} style={StyleSheet.absoluteFill} contentFit="cover" />
-      ) : (
-        <ThemedText type="smallBold" style={[styles.placeholderText, { color: colors.onSoft }]}>
-          No photo yet
-        </ThemedText>
-      )}
+      <Image source={{ uri: photo.url, cacheKey: photo.id }} style={StyleSheet.absoluteFill} contentFit="cover" />
     </View>
   );
 }
@@ -300,12 +291,6 @@ const styles = StyleSheet.create({
   frame: {
     borderWidth: 3,
     overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeholderText: {
-    textAlign: 'center',
-    paddingHorizontal: Spacing.one,
   },
   photo: {
     height: 190,

@@ -43,3 +43,22 @@ test('unknown routes return 404', async (t) => {
 
   assert.equal(res.statusCode, 404);
 });
+
+test('browsers may send every method the API uses from another origin', async (t) => {
+  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer() });
+  t.after(() => app.close());
+
+  const res = await app.inject({
+    method: 'OPTIONS',
+    url: '/events/01a12823-1641-70c1-ab2e-967f10759ae0/join',
+    headers: {
+      origin: 'http://localhost:8081',
+      'access-control-request-method': 'DELETE',
+      'access-control-request-headers': 'authorization',
+    },
+  });
+
+  assert.equal(res.statusCode, 204);
+  assert.equal(res.headers['access-control-allow-origin'], '*');
+  assert.ok(String(res.headers['access-control-allow-methods']).split(/,\s*/).includes('DELETE'));
+});

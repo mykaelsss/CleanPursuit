@@ -2,7 +2,7 @@ import type pg from 'pg';
 import { z } from 'zod';
 import { difficultyTierSchema } from './difficulty.ts';
 import { photoSchema } from './files.ts';
-import { locationSchema, selectLocation } from './geo.ts';
+import { locationSchema, placeNameSchema, selectLocation } from './geo.ts';
 import type { Storage } from './storage.ts';
 import { userSummarySchema } from './users.ts';
 import { volumeEstimate, volumeEstimateSchema } from './volume.ts';
@@ -20,6 +20,7 @@ export const reportSchema = z.object({
   id: z.uuid(),
   description: z.string(),
   location: locationSchema,
+  placeName: placeNameSchema.nullable(),
   difficultyTier: difficultyTierSchema,
   estimatedVolume: volumeEstimateSchema.nullable(),
   categories: z.array(categorySchema),
@@ -41,6 +42,7 @@ interface ReportRow {
   description: string;
   latitude: number;
   longitude: number;
+  place_name: string | null;
   difficulty_tier: Report['difficultyTier'];
   estimated_volume_min_gallons: number | null;
   estimated_volume_max_gallons: number | null;
@@ -57,7 +59,7 @@ interface ReportRow {
 }
 
 const REPORT_QUERY = `
-  SELECT r.id, r.description, ${selectLocation('r.location')}, r.difficulty_tier,
+  SELECT r.id, r.description, ${selectLocation('r.location')}, r.place_name, r.difficulty_tier,
          r.estimated_volume_min_gallons, r.estimated_volume_max_gallons,
          r.created_at, r.photo_file_id, f.key AS photo_key, u.id AS reporter_id, u.username AS reporter_username,
          q.id AS quest_id, r.duplicate_of_report_id, dq.id AS duplicate_quest_id,
@@ -81,6 +83,7 @@ async function toReport(row: ReportRow, storage: Storage): Promise<Report> {
     id: row.id,
     description: row.description,
     location: { latitude: row.latitude, longitude: row.longitude },
+    placeName: row.place_name,
     difficultyTier: row.difficulty_tier,
     estimatedVolume:
       row.estimated_volume_min_gallons === null || row.estimated_volume_max_gallons === null

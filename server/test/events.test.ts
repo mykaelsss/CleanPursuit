@@ -83,6 +83,7 @@ describe('events', { skip }, () => {
         photoFileId: file.json().id,
         description: 'Bottles under the bench',
         location: spot,
+        placeName: 'Bench by the gate',
         categories: ['plastic'],
         hazards: ['broken_glass'],
       },
@@ -120,6 +121,7 @@ describe('events', { skip }, () => {
     assert.equal(created.statusCode, 201);
     const event = created.json();
     assert.equal(event.title, 'Clear the bench');
+    assert.equal(event.placeName, 'Bench by the gate');
     assert.equal(event.organizer.id, organizer.userId);
     assert.equal(event.isOrganizer, true);
     assert.equal(event.difficultyTier, 'hard');
