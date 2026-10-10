@@ -1,14 +1,14 @@
-import { memo, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { useEffect, useRef, useState } from 'react';
+import { Linking, StyleSheet, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
+import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 
-import { DisplayFont, Tiers } from '@/constants/theme';
+import { ThemedText } from '@/components/themed-text';
+import { Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import type { NearbyEvent } from '@/lib/api';
-import { DARK_MAP_STYLE } from '@/lib/map-styles';
-import { NYC_BOUNDS, NYC_MIN_ZOOM, NYC_REGION } from '@/lib/nyc';
+import { LEAFLET_MAP_HTML, MAP_PAGE_URL, type MapCommand, parseMapEvent, useMapUpdate } from '@/lib/leaflet-map-html';
 
 export interface EventsMapProps {
   events: NearbyEvent[];
@@ -16,135 +16,112 @@ export interface EventsMapProps {
   onSelect: (id: string) => void;
   // Where to center the map, such as the user's location. Changing it pans the map there.
   center: { latitude: number; longitude: number } | null;
-  // Space covered by the bottom sheet, so Google's controls and centering stay visible.
+  // The user's location, shown as a blue dot, or null when unknown or outside NYC.
+  userLocation: { latitude: number; longitude: number } | null;
+  // Space covered by the bottom sheet, so centering and the location button stay visible.
   bottomPadding: number;
 }
 
-// Custom marker views are drawn to a bitmap. They must redraw after mounting or changing, then stop,
-// or every pin keeps re-rendering and the map stutters.
-const PIN_SETTLE_MS = 500;
-
-export function EventsMap({ events, selectedId, onSelect, center, bottomPadding }: EventsMapProps) {
-  const map = useRef<MapView>(null);
-  // With Reduce Motion on, the camera jumps instead of gliding.
+// The Leaflet map page (see leaflet-map-html.ts) in a WebView.
+export function EventsMap({ events, selectedId, onSelect, center, userLocation, bottomPadding }: EventsMapProps) {
+  const webView = useRef<WebView>(null);
+  const ready = useRef(false);
+  const latest = useRef<{ update: MapCommand | null; center: EventsMapProps['center'] }>({ update: null, center: null });
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // With Reduce Motion on, the map jumps instead of gliding.
   const reduceMotion = useReducedMotion();
   const scheme = useColorScheme();
+  const theme = useTheme();
+
+  const update = useMapUpdate({
+    events,
+    selectedId,
+    user: userLocation,
+    bottomPadding,
+    reduceMotion,
+    dark: scheme === 'dark',
+    // The selected pin turns forest green with gold text, like the quest card's reward panel.
+    selectedFill: theme.ink,
+    selectedText: theme.reward,
+  });
+
+  function send(command: MapCommand) {
+    webView.current?.injectJavaScript(`window.cpReceive && window.cpReceive(${JSON.stringify(command)}); true;`);
+  }
 
   useEffect(() => {
-    if (center) map.current?.animateCamera({ center, zoom: 14 }, { duration: reduceMotion ? 0 : 500 });
-  }, [center, reduceMotion]);
+    latest.current.update = update;
+    if (ready.current) send(update);
+  }, [update]);
 
-  // Pan to the selected quest, whether it was picked on the map or in the list.
   useEffect(() => {
-    const event = events.find((e) => e.id === selectedId);
-    if (event) map.current?.animateCamera({ center: event.location }, { duration: reduceMotion ? 0 : 400 });
-  }, [selectedId, events, reduceMotion]);
+    latest.current.center = center;
+    if (ready.current && center) send({ type: 'center', ...center });
+  }, [center]);
+
+  function onMessage(e: WebViewMessageEvent) {
+    const event = parseMapEvent(e.nativeEvent.data);
+    if (event?.type === 'ready') {
+      ready.current = true;
+      setLoadError(null);
+      if (latest.current.update) send(latest.current.update);
+      if (latest.current.center) send({ type: 'center', ...latest.current.center });
+    } else if (event?.type === 'select') {
+      onSelect(event.id);
+    } else if (event?.type === 'error') {
+      setLoadError(event.message);
+    }
+  }
 
   return (
-    <MapView
-      ref={map}
-      provider={PROVIDER_GOOGLE}
-      style={StyleSheet.absoluteFill}
-      initialRegion={NYC_REGION}
-      customMapStyle={scheme === 'dark' ? DARK_MAP_STYLE : []}
-      minZoomLevel={NYC_MIN_ZOOM}
-      // Keep the camera inside the five boroughs.
-      onMapReady={() => map.current?.setMapBoundaries(NYC_BOUNDS.northEast, NYC_BOUNDS.southWest)}
-      showsUserLocation
-      showsMyLocationButton
-      toolbarEnabled={false}
-      mapPadding={{ top: 0, right: 0, bottom: bottomPadding, left: 0 }}>
-      {events.map((event) => (
-        <XpPin key={event.id} event={event} selected={event.id === selectedId} onSelect={onSelect} />
-      ))}
-    </MapView>
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.background }]}>
+      <WebView
+        ref={webView}
+        source={{ html: LEAFLET_MAP_HTML, baseUrl: MAP_PAGE_URL }}
+        originWhitelist={['*']}
+        onMessage={onMessage}
+        // Links in the map credits open in the browser instead of replacing the map.
+        onShouldStartLoadWithRequest={(request) => {
+          const { url } = request;
+          if (url === MAP_PAGE_URL || url.startsWith('about:') || url.startsWith('data:')) return true;
+          Linking.openURL(url);
+          return false;
+        }}
+        onError={() => setLoadError('The map could not load. Check your connection.')}
+        // Reloading the page resets it, so it must say it is ready again before taking commands.
+        onLoadStart={() => {
+          ready.current = false;
+        }}
+        style={styles.webView}
+        bounces={false}
+        scrollEnabled={false}
+        overScrollMode="never"
+        setBuiltInZoomControls={false}
+        setSupportMultipleWindows={false}
+        accessibilityLabel="Map of cleanup events"
+      />
+      {loadError && (
+        <View style={[styles.error, { backgroundColor: theme.backgroundElement }]} accessibilityRole="alert">
+          <ThemedText type="small" themeColor="error">
+            {loadError}
+          </ThemedText>
+        </View>
+      )}
+    </View>
   );
 }
 
-// A bubble with the quest's XP in its difficulty color. The selected pin turns forest green with gold text and
-// grows, so it stands out by size and shape as well as color.
-const XpPin = memo(function XpPin({
-  event,
-  selected,
-  onSelect,
-}: {
-  event: NearbyEvent;
-  selected: boolean;
-  onSelect: (id: string) => void;
-}) {
-  const theme = useTheme();
-  const tier = Tiers[event.difficultyTier];
-  const background = selected ? theme.ink : tier.fill;
-  const color = selected ? theme.reward : tier.onFill;
-
-  // The selection the bitmap was last drawn for. Until it catches up, the marker keeps redrawing.
-  const [drawnFor, setDrawnFor] = useState<boolean | null>(null);
-  useEffect(() => {
-    const timer = setTimeout(() => setDrawnFor(selected), PIN_SETTLE_MS);
-    return () => clearTimeout(timer);
-  }, [selected]);
-
-  return (
-    <Marker
-      identifier={event.id}
-      coordinate={event.location}
-      title={event.title}
-      anchor={{ x: 0.5, y: 1 }}
-      tracksViewChanges={drawnFor !== selected}
-      // Keep the selected pin on top of any pins that overlap it.
-      zIndex={selected ? 1 : 0}
-      // A tap opens the quest card instead of Google's info window.
-      onPress={(e) => {
-        e.stopPropagation();
-        onSelect(event.id);
-      }}>
-      <View style={styles.pin}>
-        <View style={[styles.bubble, selected && styles.bubbleSelected, { backgroundColor: background }]}>
-          <Text style={[styles.text, selected && styles.textSelected, { color }]} allowFontScaling={false}>
-            {event.maxXp.toLocaleString()} XP
-          </Text>
-        </View>
-        <View style={[styles.pointer, { borderTopColor: background }]} />
-      </View>
-    </Marker>
-  );
-});
-
 const styles = StyleSheet.create({
-  pin: {
-    alignItems: 'center',
+  webView: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
-  bubble: {
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-  },
-  bubbleSelected: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 16,
-    borderWidth: 3,
-  },
-  text: {
-    fontFamily: DisplayFont,
-    fontWeight: 'normal',
-    fontSize: 14,
-    lineHeight: 18,
-  },
-  textSelected: {
-    fontSize: 18,
-    lineHeight: 22,
-  },
-  pointer: {
-    width: 0,
-    height: 0,
-    marginTop: -1,
-    borderLeftWidth: 7,
-    borderRightWidth: 7,
-    borderTopWidth: 9,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
+  error: {
+    position: 'absolute',
+    top: Spacing.six,
+    left: Spacing.four,
+    right: Spacing.four,
+    padding: Spacing.three,
+    borderRadius: Spacing.three,
   },
 });
