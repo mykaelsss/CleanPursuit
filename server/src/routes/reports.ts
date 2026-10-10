@@ -51,6 +51,7 @@ const reportRoutes: FastifyPluginAsyncZod = async (app) => {
         summary: 'Report a spot that needs cleaning up',
         description:
           'The difficulty tier is set from the tags. ' +
+          'Tags suggested by `POST /files/{id}/analysis` that the reporter kept are recorded as coming from Gemini. ' +
           'If the spot is already reported, the report is still saved and `duplicateOf` points at the original.',
         security,
         body: z.object({
@@ -118,15 +119,22 @@ const reportRoutes: FastifyPluginAsyncZod = async (app) => {
           );
           const id = rows[0]!.id;
 
+          // A tag is Gemini's when it suggested it for this photo and the reporter kept it.
           await client.query(
             `INSERT INTO report_category (report_id, category_code, source)
-             SELECT $1, unnest($2::text[]), 'user'`,
-            [id, categories],
+             SELECT $1, code,
+                    CASE WHEN code = ANY (pa.category_codes) THEN 'gemini' ELSE 'user' END::tag_source
+             FROM unnest($2::text[]) AS code
+             LEFT JOIN photo_analysis pa ON pa.file_id = $3`,
+            [id, categories, photoFileId],
           );
           await client.query(
             `INSERT INTO report_hazard (report_id, hazard_code, source)
-             SELECT $1, unnest($2::text[]), 'user'`,
-            [id, hazards],
+             SELECT $1, code,
+                    CASE WHEN code = ANY (pa.hazard_codes) THEN 'gemini' ELSE 'user' END::tag_source
+             FROM unnest($2::text[]) AS code
+             LEFT JOIN photo_analysis pa ON pa.file_id = $3`,
+            [id, hazards, photoFileId],
           );
 
           // Feeds the hotspot aggregate. area_id and guild_id are snapshots taken now.

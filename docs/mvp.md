@@ -43,9 +43,9 @@ The demo works end to end with these six features.
 ### Should have: what wins tracks
 
 - **Gemini photo analysis.**
-  One call per report.
-  Gemini returns structured JSON: trash categories from a fixed list, hazard flags, estimated bag count and terrain.
-  Our own rules map those to a difficulty tier: easy, medium, hard or legendary.
+  One call per report photo, made right after upload, before the report is sent.
+  Gemini returns structured JSON: whether the photo shows litter, a suggested description, trash categories from a fixed list, hazard flags, estimated bag count and terrain.
+  The report form opens prefilled, the reporter confirms or edits it, and our own rules map the tags to a difficulty tier: easy, medium, hard or legendary.
 - **Equipment and warnings lookup.**
   Tables keyed by trash category and hazard, so Gemini is never called again for gear lists.
 - **Hotspot multiplier.**
@@ -75,7 +75,9 @@ A group gets credit together, and a cleanup can take several tries.
 
 - A user submits a photo, location and description.
 - The location snaps to an H3 cell (resolution 10, about 75 m edge) stored as `area_id`.
-- The reporter picks trash categories and any hazards, and our rules set the difficulty tier from them (see [Difficulty tier](#difficulty-tier)).
+- Gemini looks at the photo as soon as it is uploaded and prefills the form with a description, trash categories, hazards and a bag count.
+- The reporter confirms or edits the categories and any hazards, and our rules set the difficulty tier from them (see [Difficulty tier](#difficulty-tier)).
+- If Gemini is slow or down, the form starts empty and the reporter fills it in by hand.
 - If someone reports a spot that is already reported, the app tells them it exists.
   A new report is still saved and linked to the original as a duplicate.
 - A spot counts as already reported when an original report within 25 m still needs work: it has no quest yet, or its quest is open.
@@ -93,8 +95,9 @@ The first rule that matches sets the tier:
 | Medium | Bulky items or electronics, or 4 or more estimated bags |
 | Easy | Anything else |
 
-The tags come from the reporter for now.
-Gemini will add its own tags, and the tier is recomputed from all of them, so Gemini never sets the tier directly.
+The tags are the ones the reporter submits, after Gemini's suggestions prefill the form.
+Gemini never sets the tier directly, and it never adds a tag the reporter did not see.
+Each tag records whether it came from Gemini or the reporter.
 The tier stays provisional until a party ends, when the leader can correct the tags.
 
 ### Quest
@@ -178,10 +181,21 @@ Aggregates are real-time and the daily ones refresh every 5 minutes, so the demo
 
 ## Gemini
 
-- Use a Flash-class model with a response schema for structured output.
-- Call it once per report and store the result with the report.
+- Model: `gemini-3.5-flash-lite`, set by `GEMINI_MODEL` and pinned to a stable version rather than a `-latest` alias.
+- Use a response schema for structured output, with the category and hazard codes from the database as enums.
+- Call it once per uploaded report photo and store the result in `photo_analysis`, keyed by the file.
 - Never call it on page loads.
-- Gemini only extracts features; our rules set the tier.
+- Gemini only extracts features; the reporter confirms the tags and our rules set the tier.
+- Thinking is set to low: picking from short lists needs little reasoning, and the reporter is waiting.
+- Calls time out after 20 seconds, and reporting works without Gemini.
+
+Why Flash-Lite:
+
+- The task is classification from fixed lists plus one sentence, which Flash-Lite is built for.
+- In a first test on four photos it answered in about 2 seconds, using about 1,430 input and 80 output tokens, or about $0.60 per 1,000 photos.
+- Gemini 3.8 Flash costs about 2.5 times as much per input token, more until its launch pricing ends on January 1, 2027, and took 3 to 4 seconds or timed out in the same test.
+- The risk is missing small hazards such as needles.
+  The reporter confirms every tag, and `photo_analysis` records the model, so switching `GEMINI_MODEL` is a one-line change if a test set shows Flash-Lite missing hazards.
 
 ## Directions handoff
 
@@ -209,7 +223,7 @@ The core loop ships first so there is always a working demo.
 2. Report and quest creation, with photo upload. (API done)
 3. Map and list views, plus party sign-up and check-in.
 4. Ending a party with bag count and after photo, then XP and the leaderboard.
-5. Gemini photo analysis, the tier rules and the equipment lookup.
+5. Gemini photo analysis, the tier rules and the equipment lookup. (Analysis and tier rules done in the API)
 6. Hotspot aggregate and bonus XP.
 7. Biohazard drop-off map with directions links, and the resources page.
 8. Seed a few months of backdated data for one demo region, plus a few hand-verified sharps drop-off locations.
@@ -230,8 +244,8 @@ The core loop ships first so there is always a working demo.
 
 Done:
 
-- Schema migrations `001` and `002` are applied to the DEV Tiger service and tested.
-- API: auth, photo uploads to R2, reports with duplicate detection and difficulty tiers, and quests.
+- Schema migrations `001` to `003` are applied to the DEV Tiger service and tested.
+- API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, and quests.
 
 Open:
 
@@ -241,5 +255,4 @@ Open:
 - [ ] Gear seed data for the equipment lookup.
 - [ ] Backdated demo data.
 - [ ] Dashboard aggregate.
-- [ ] Where Gemini results are stored.
 - [ ] Task split across the team: frontend, Tiger Data and backend, Gemini integration, demo data.

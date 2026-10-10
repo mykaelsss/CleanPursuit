@@ -14,6 +14,10 @@ const envSchema = z.object({
   R2_ACCESS_KEY_ID: z.string().min(1),
   R2_SECRET_ACCESS_KEY: z.string().min(1),
   R2_BUCKET: z.string().min(1),
+  // Gemini, for photo analysis. Create a key in Google AI Studio.
+  GEMINI_API_KEY: z.string().min(1),
+  // Pinned to a stable model, not a -latest alias, so behavior only changes on purpose.
+  GEMINI_MODEL: z.string().min(1).default('gemini-3.5-flash-lite'),
 });
 
 export type Env = z.infer<typeof envSchema>;
