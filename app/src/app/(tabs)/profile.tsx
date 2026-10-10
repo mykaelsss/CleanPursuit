@@ -1,8 +1,10 @@
-import { StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
 import AppBadge from "@/components/app-badge";
 import AppCard from "@/components/app-card";
 import BountyPoster from "@/components/bounty-poster";
+import { MIN_TOUCH } from "@/components/event-card";
+import { squish } from "@/components/quest-ui";
 import ScreenLayout from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { useTheme } from "@/hooks/use-theme";
@@ -10,7 +12,7 @@ import { useAuth } from "@/lib/auth";
 
 export default function ProfileScreen() {
   const theme = useTheme();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
 
   // The tabs only render while signed in, but the user can briefly be null.
   if (!user) return null;
@@ -95,6 +97,16 @@ export default function ProfileScreen() {
             : "Complete cleanup quests to earn XP and level up."}
         </ThemedText>
       </AppCard>
+
+      <Pressable
+        onPress={signOut}
+        accessibilityRole="button"
+        style={squish([styles.logOut, { borderColor: theme.border }])}
+      >
+        <ThemedText type="smallBold" themeColor="error">
+          Log out
+        </ThemedText>
+      </Pressable>
     </ScreenLayout>
   );
 }
@@ -119,5 +131,14 @@ const styles = StyleSheet.create({
   progressFill: {
     height: "100%",
     borderRadius: 6,
+  },
+  // Set apart from the progress content so it reads as an account action, not part of the game.
+  logOut: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: MIN_TOUCH,
+    marginTop: 16,
+    borderRadius: MIN_TOUCH / 2,
+    borderWidth: 1.5,
   },
 });
