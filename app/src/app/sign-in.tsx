@@ -97,7 +97,9 @@ export default function SignInScreen() {
               <Segment label="Sign up" active={signingUp} onPress={() => switchMode('signUp')} />
             </ThemedView>
 
-            <View style={styles.form}>
+            {/* Keyed by mode so each form gets fresh inputs. Changing a live password field's autofill
+                hints makes iOS and Safari re-run password AutoFill, which flickers. */}
+            <View key={mode} style={styles.form}>
               {signingUp ? (
                 <>
                   <Field
@@ -174,7 +176,7 @@ export default function SignInScreen() {
                 {submitting ? (
                   <ActivityIndicator color={theme.onTint} />
                 ) : (
-                  <ThemedText themeColor="onTint" style={styles.buttonLabel}>
+                  <ThemedText themeColor="onTint" selectable={false} style={styles.buttonLabel}>
                     {signingUp ? 'Create account' : 'Log in'}
                   </ThemedText>
                 )}
@@ -195,7 +197,7 @@ function Segment({ label, active, onPress }: { label: string; active: boolean; o
       accessibilityState={{ selected: active }}
       style={styles.segment}>
       <ThemedView type={active ? 'background' : 'backgroundElement'} style={styles.segmentInner}>
-        <ThemedText type="smallBold" themeColor={active ? 'text' : 'textSecondary'}>
+        <ThemedText type="smallBold" themeColor={active ? 'text' : 'textSecondary'} selectable={false}>
           {label}
         </ThemedText>
       </ThemedView>
@@ -239,13 +241,14 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  // Anchored to the top, not centered, so the header and mode switch stay put when the sign-up form adds fields.
   scroll: {
     flexGrow: 1,
-    justifyContent: 'center',
     alignSelf: 'center',
     width: '100%',
     maxWidth: 420,
     padding: Spacing.four,
+    paddingTop: Spacing.six,
     gap: Spacing.four,
   },
   header: {

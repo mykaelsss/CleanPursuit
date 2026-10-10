@@ -13,8 +13,8 @@ import {
 
 import { Avatar, displayStyles, squish, TierBadge, xpText } from '@/components/quest-ui';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing, Tiers } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { Spacing } from '@/constants/theme';
+import { useTheme, useTierColors } from '@/hooks/use-theme';
 import type { CleanupEvent, DifficultyTier, EventDetail } from '@/lib/api';
 import { describeEventTime, formatDuration, formatEventTime, lookupAddress } from '@/lib/event-format';
 
@@ -39,6 +39,7 @@ interface EventCardProps {
 
 export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose, titleRef }: EventCardProps) {
   const theme = useTheme();
+  const leaderTag = useTierColors('legendary');
   // Keyed by event, so switching events never shows the previous event's address.
   const [resolved, setResolved] = useState<{ eventId: string; address: string } | null>(null);
   const address = resolved?.eventId === event.id ? resolved.address : null;
@@ -59,7 +60,7 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
         <ThemedText
           ref={titleRef}
           accessibilityRole="header"
-          themeColor="ink"
+          themeColor="text"
           style={[displayStyles.base, styles.title]}>
           {event.title}
         </ThemedText>
@@ -67,8 +68,8 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
           onPress={onClose}
           accessibilityRole="button"
           accessibilityLabel="Close quest details"
-          style={squish([styles.closeButton, { backgroundColor: theme.surface }])}>
-          <ThemedText type="smallBold" themeColor="ink">
+          style={squish([styles.closeButton, { backgroundColor: theme.backgroundElement, borderColor: theme.border }])}>
+          <ThemedText type="smallBold" themeColor="text">
             Close
           </ThemedText>
         </Pressable>
@@ -95,7 +96,7 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
       {/* The reward and the button that claims it, together on an ink panel. */}
       <View style={[styles.reward, { backgroundColor: theme.ink }]}>
         <View accessible accessibilityLabel={`Reward: ${xpText(event.maxXp)}. Stay the whole time slot to earn it all.`}>
-          <ThemedText style={[displayStyles.base, styles.rewardXp, { color: theme.xp }]}>{xpText(event.maxXp)}</ThemedText>
+          <ThemedText style={[displayStyles.base, styles.rewardXp, { color: theme.reward }]}>{xpText(event.maxXp)}</ThemedText>
           <ThemedText type="small" style={{ color: theme.onInkSoft }}>
             Stay the whole time slot to earn it all.
           </ThemedText>
@@ -133,11 +134,11 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
             accessibilityRole="button"
             accessibilityLabel="Join party"
             accessibilityState={{ disabled: busy, busy }}
-            style={squish([styles.joinButton, { backgroundColor: theme.xp }, busy && styles.busy])}>
+            style={squish([styles.joinButton, { backgroundColor: theme.reward }, busy && styles.busy])}>
             {busy ? (
-              <ActivityIndicator color={theme.ink} />
+              <ActivityIndicator color={theme.onReward} />
             ) : (
-              <ThemedText style={[displayStyles.base, styles.joinLabel, { color: theme.ink }]}>Join party</ThemedText>
+              <ThemedText style={[displayStyles.base, styles.joinLabel, { color: theme.onReward }]}>Join party</ThemedText>
             )}
           </Pressable>
         )}
@@ -162,7 +163,7 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
       <ThemedText style={styles.description}>{event.description}</ThemedText>
 
       <View style={styles.party}>
-        <ThemedText accessibilityRole="header" themeColor="ink" style={[displayStyles.base, styles.partyTitle]}>
+        <ThemedText accessibilityRole="header" themeColor="text" style={[displayStyles.base, styles.partyTitle]}>
           Party of {partySize}
         </ThemedText>
         {event.isOrganizer ? (
@@ -184,8 +185,8 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
                 <View style={styles.memberName}>
                   <ThemedText>@{member.user.username}</ThemedText>
                   {member.isOrganizer ? (
-                    <View style={[styles.leaderTag, { backgroundColor: Tiers.legendary.soft }]}>
-                      <ThemedText type="smallBold" style={{ color: Tiers.legendary.onSoft }}>
+                    <View style={[styles.leaderTag, { backgroundColor: leaderTag.soft }]}>
+                      <ThemedText type="smallBold" style={{ color: leaderTag.onSoft }}>
                         Leader
                       </ThemedText>
                     </View>
@@ -222,7 +223,7 @@ export function SitePhoto({
   style: StyleProp<ViewStyle>;
   label?: string;
 }) {
-  const colors = Tiers[tier];
+  const colors = useTierColors(tier);
   const hasPhoto = !!photo.url;
   const a11y = label
     ? ({
@@ -281,6 +282,7 @@ const styles = StyleSheet.create({
     minWidth: MIN_TOUCH,
     paddingHorizontal: Spacing.three,
     borderRadius: MIN_TOUCH / 2,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

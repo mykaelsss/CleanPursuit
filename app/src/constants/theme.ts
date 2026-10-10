@@ -6,40 +6,87 @@ import { Platform } from 'react-native';
 // Text colors keep at least 4.5:1 contrast (WCAG AA) against background and backgroundElement.
 export const Colors = {
   light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+    text: '#243B35',
+    textSecondary: '#58736A',
+
+    background: '#F0FAE9',
+    backgroundElement: '#FFFFFF',
+    backgroundSelected: '#D5F1FF',
+
     tint: '#187A42',
     onTint: '#ffffff',
     error: '#CE2C31',
-    // The selected map pin. Blue, so it stays distinct from the green pins with red-green color blindness.
-    pinSelected: '#1F6FEB',
-    // Quest screen: deep ink panels with gold XP, like a game's reward screen.
-    ink: '#1E1B3A',
+
+    primary: '#72C94B',
+    onPrimary: '#243B35',
+    header: '#A8E477',
+
+    accent: '#18B9E0',
+    highlight: '#D5F1FF',
+
+    sage: '#C5E5AE',
+    sageText: '#354B2C',
+
+    reward: '#FFD568',
+    onReward: '#49320C',
+
+    // Quest reward panels: deep forest green holding the gold XP and the join button, like a game's reward screen.
+    ink: '#1F4A36',
     onInk: '#FFFFFF',
-    onInkSoft: '#C9C6E8',
-    xp: '#FFD43B',
-    surface: '#F1F0F7',
-    textOnSurface: '#5A5873',
+    onInkSoft: '#C5E5AE',
+
+    earth: '#B58B62',
+    border: '#CBE5BB',
+
+    badge: '#8DD9C0',
+    onBadge: '#243B35',
+
+    poster: '#DABF8F',
+    posterFiber: '#EFE3C8',
+    posterStain: '#7A4416',
+    posterInk: '#3A2414',
+    posterPhoto: 'rgba(122, 74, 30, 0.12)',
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    text: '#F3FAFF',
+    textSecondary: '#B6CAD7',
+
+    background: '#182733',
+    backgroundElement: '#263C4B',
+    backgroundSelected: '#285A73',
+
     tint: '#3DD68C',
     onTint: '#0B2A1A',
     error: '#FF9592',
-    pinSelected: '#58A6FF',
-    ink: '#2A2650',
+
+    primary: '#97E56A',
+    onPrimary: '#243B35',
+    header: '#A8E477',
+
+    accent: '#55D8FA',
+    highlight: '#285A73',
+
+    sage: '#C5E5AE',
+    sageText: '#354B2C',
+
+    reward: '#FFD568',
+    onReward: '#49320C',
+
+    ink: '#2A6247',
     onInk: '#FFFFFF',
-    onInkSoft: '#C9C6E8',
-    xp: '#FFD43B',
-    surface: '#1A1830',
-    textOnSurface: '#B9B5DE',
+    onInkSoft: '#C5E5AE',
+
+    earth: '#C9A37A',
+    border: '#466273',
+
+    badge: '#8DD9C0',
+    onBadge: '#243B35',
+
+    poster: '#DABF8F',
+    posterFiber: '#EFE3C8',
+    posterStain: '#7A4416',
+    posterInk: '#3A2414',
+    posterPhoto: 'rgba(122, 74, 30, 0.12)',
   },
 } as const;
 
@@ -75,13 +122,37 @@ export const Fonts = Platform.select({
 export const DisplayFont = 'LilitaOne_400Regular';
 
 // Difficulty works like loot rarity. Each tier has a solid fill (pins, photo frames) with the text color
-// that reads on it, and a soft fill with its text color for badges. All text pairs pass WCAG AA.
-// Tiers also show as 1 to 4 pips, so they never rely on color alone.
+// that reads on it, and a soft fill with its text color for badges, per color scheme. All text pairs pass
+// WCAG AA. Tiers also show as 1 to 4 pips, so they never rely on color alone.
 export const Tiers = {
-  easy: { pips: 1, fill: '#237032', onFill: '#FFFFFF', soft: '#E3F5E7', onSoft: '#1B5E2A' },
-  medium: { pips: 2, fill: '#1971C2', onFill: '#FFFFFF', soft: '#E2EEFB', onSoft: '#155EA6' },
-  hard: { pips: 3, fill: '#6741D9', onFill: '#FFFFFF', soft: '#EEE9FC', onSoft: '#5530C4' },
-  legendary: { pips: 4, fill: '#FAB005', onFill: '#1E1B3A', soft: '#FFF1C9', onSoft: '#7A4200' },
+  easy: {
+    pips: 1,
+    fill: '#237032',
+    onFill: '#FFFFFF',
+    soft: { light: '#E3F5E7', dark: '#24503A' },
+    onSoft: { light: '#1B5E2A', dark: '#A8EBBA' },
+  },
+  medium: {
+    pips: 2,
+    fill: '#1971C2',
+    onFill: '#FFFFFF',
+    soft: { light: '#E2EEFB', dark: '#1F4570' },
+    onSoft: { light: '#155EA6', dark: '#B4D6FA' },
+  },
+  hard: {
+    pips: 3,
+    fill: '#6741D9',
+    onFill: '#FFFFFF',
+    soft: { light: '#EEE9FC', dark: '#3E3373' },
+    onSoft: { light: '#5530C4', dark: '#D4C8FE' },
+  },
+  legendary: {
+    pips: 4,
+    fill: '#FAB005',
+    onFill: '#243B35',
+    soft: { light: '#FFF1C9', dark: '#4A3A10' },
+    onSoft: { light: '#7A4200', dark: '#FFD568' },
+  },
 } as const;
 export const TIER_PIPS = 4;
 

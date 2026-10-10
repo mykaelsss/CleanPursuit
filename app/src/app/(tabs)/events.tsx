@@ -322,7 +322,7 @@ export default function EventsScreen() {
                 <ThemedText
                   ref={listTitle}
                   accessibilityRole="header"
-                  themeColor="ink"
+                  themeColor="text"
                   style={[displayStyles.base, styles.listTitle]}>
                   Quests near you
                 </ThemedText>
@@ -332,7 +332,7 @@ export default function EventsScreen() {
                   </ThemedText>
                 ) : null}
                 {samples ? (
-                  <View style={[styles.sampleBanner, { backgroundColor: theme.surface }]} accessible>
+                  <View style={[styles.sampleBanner, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]} accessible>
                     <ThemedText type="smallBold">Sample quests</ThemedText>
                     <ThemedText type="small" themeColor="textSecondary">
                       Placeholders for the layout, shown in development until real quests exist.
@@ -463,7 +463,7 @@ const EventRow = memo(function EventRow({
       style={squish(styles.row)}>
       <SitePhoto photo={event.photo} tier={event.difficultyTier} style={styles.thumbnail} />
       <View style={styles.rowText}>
-        <ThemedText themeColor="ink" style={[displayStyles.base, styles.rowTitle]} numberOfLines={2}>
+        <ThemedText themeColor="text" style={[displayStyles.base, styles.rowTitle]} numberOfLines={2}>
           {event.title}
         </ThemedText>
         <View style={styles.rowBadges}>
@@ -477,7 +477,7 @@ const EventRow = memo(function EventRow({
           <ThemedText type="small" themeColor="textSecondary">
             {formatDistance(event.distanceM)}
           </ThemedText>
-          <ThemedText type="smallBold" themeColor="ink">
+          <ThemedText type="smallBold" themeColor="text">
             {party}
           </ThemedText>
         </View>
@@ -515,6 +515,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.two,
     padding: Spacing.two + Spacing.one,
     borderRadius: Spacing.two + Spacing.one,
+    borderWidth: 1,
     gap: Spacing.half,
   },
   listTitle: {

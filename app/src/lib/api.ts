@@ -10,7 +10,17 @@ export interface User {
   username: string;
   email: string;
   totalXp: number;
+  level: Level;
   createdAt: string;
+}
+
+// Computed by the API from totalXp; see docs/mvp.md#levels.
+export interface Level {
+  number: number;
+  // XP earned since reaching this level.
+  xpIntoLevel: number;
+  // XP this level takes to finish; null at the max level.
+  xpForNextLevel: number | null;
 }
 
 export interface Tokens {

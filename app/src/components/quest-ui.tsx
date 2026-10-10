@@ -1,8 +1,8 @@
 import { StyleSheet, View, type PressableStateCallbackType, type StyleProp, type ViewStyle } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { AvatarColors, DisplayFont, Spacing, TIER_PIPS, Tiers } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { AvatarColors, DisplayFont, Spacing, TIER_PIPS } from '@/constants/theme';
+import { useTheme, useTierColors } from '@/hooks/use-theme';
 import type { DifficultyTier } from '@/lib/api';
 import { TIER_LABELS } from '@/lib/event-format';
 
@@ -17,7 +17,7 @@ export function xpText(maxXp: number) {
 
 // A quest's difficulty as rarity: filled pips out of four, plus the tier name.
 export function TierBadge({ tier, solid }: { tier: DifficultyTier; solid?: boolean }) {
-  const colors = Tiers[tier];
+  const colors = useTierColors(tier);
   const background = solid ? colors.fill : colors.soft;
   const foreground = solid ? colors.onFill : colors.onSoft;
   const label = TIER_LABELS[tier];
@@ -39,12 +39,12 @@ export function TierBadge({ tier, solid }: { tier: DifficultyTier; solid?: boole
   );
 }
 
-// Gold XP on ink, the reward color everywhere on the quests screen.
+// Gold XP on a forest green panel, the reward colors everywhere on the quests screen.
 export function XpBadge({ maxXp }: { maxXp: number }) {
   const theme = useTheme();
   return (
     <View style={[styles.badge, { backgroundColor: theme.ink }]}>
-      <ThemedText style={[styles.badgeText, { color: theme.xp }]}>{xpText(maxXp)}</ThemedText>
+      <ThemedText style={[styles.badgeText, { color: theme.reward }]}>{xpText(maxXp)}</ThemedText>
     </View>
   );
 }

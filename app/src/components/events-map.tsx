@@ -4,8 +4,10 @@ import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useReducedMotion } from 'react-native-reanimated';
 
 import { DisplayFont, Tiers } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import type { NearbyEvent } from '@/lib/api';
+import { DARK_MAP_STYLE } from '@/lib/map-styles';
 import { NYC_BOUNDS, NYC_MIN_ZOOM, NYC_REGION } from '@/lib/nyc';
 
 export interface EventsMapProps {
@@ -26,6 +28,7 @@ export function EventsMap({ events, selectedId, onSelect, center, bottomPadding 
   const map = useRef<MapView>(null);
   // With Reduce Motion on, the camera jumps instead of gliding.
   const reduceMotion = useReducedMotion();
+  const scheme = useColorScheme();
 
   useEffect(() => {
     if (center) map.current?.animateCamera({ center, zoom: 14 }, { duration: reduceMotion ? 0 : 500 });
@@ -43,6 +46,7 @@ export function EventsMap({ events, selectedId, onSelect, center, bottomPadding 
       provider={PROVIDER_GOOGLE}
       style={StyleSheet.absoluteFill}
       initialRegion={NYC_REGION}
+      customMapStyle={scheme === 'dark' ? DARK_MAP_STYLE : []}
       minZoomLevel={NYC_MIN_ZOOM}
       // Keep the camera inside the five boroughs.
       onMapReady={() => map.current?.setMapBoundaries(NYC_BOUNDS.northEast, NYC_BOUNDS.southWest)}
@@ -57,7 +61,7 @@ export function EventsMap({ events, selectedId, onSelect, center, bottomPadding 
   );
 }
 
-// A bubble with the quest's XP in its difficulty color. The selected pin turns ink with gold text and
+// A bubble with the quest's XP in its difficulty color. The selected pin turns forest green with gold text and
 // grows, so it stands out by size and shape as well as color.
 const XpPin = memo(function XpPin({
   event,
@@ -71,7 +75,7 @@ const XpPin = memo(function XpPin({
   const theme = useTheme();
   const tier = Tiers[event.difficultyTier];
   const background = selected ? theme.ink : tier.fill;
-  const color = selected ? theme.xp : tier.onFill;
+  const color = selected ? theme.reward : tier.onFill;
 
   // The selection the bitmap was last drawn for. Until it catches up, the marker keeps redrawing.
   const [drawnFor, setDrawnFor] = useState<boolean | null>(null);

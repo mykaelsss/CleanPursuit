@@ -5,6 +5,7 @@ import { photoSchema } from './files.ts';
 import { locationSchema, selectLocation } from './geo.ts';
 import type { Storage } from './storage.ts';
 import { userSummarySchema } from './users.ts';
+import { volumeEstimate, volumeEstimateSchema } from './volume.ts';
 
 export const categorySchema = z.object({ code: z.string(), label: z.string() });
 
@@ -20,7 +21,7 @@ export const reportSchema = z.object({
   description: z.string(),
   location: locationSchema,
   difficultyTier: difficultyTierSchema,
-  estimatedBagCount: z.number().int().nullable(),
+  estimatedVolume: volumeEstimateSchema.nullable(),
   categories: z.array(categorySchema),
   hazards: z.array(hazardSchema),
   photo: photoSchema,
@@ -41,7 +42,8 @@ interface ReportRow {
   latitude: number;
   longitude: number;
   difficulty_tier: Report['difficultyTier'];
-  estimated_bag_count: number | null;
+  estimated_volume_min_gallons: number | null;
+  estimated_volume_max_gallons: number | null;
   created_at: Date;
   photo_file_id: string;
   photo_key: string;
@@ -55,7 +57,8 @@ interface ReportRow {
 }
 
 const REPORT_QUERY = `
-  SELECT r.id, r.description, ${selectLocation('r.location')}, r.difficulty_tier, r.estimated_bag_count,
+  SELECT r.id, r.description, ${selectLocation('r.location')}, r.difficulty_tier,
+         r.estimated_volume_min_gallons, r.estimated_volume_max_gallons,
          r.created_at, r.photo_file_id, f.key AS photo_key, u.id AS reporter_id, u.username AS reporter_username,
          q.id AS quest_id, r.duplicate_of_report_id, dq.id AS duplicate_quest_id,
          COALESCE((SELECT json_agg(json_build_object('code', c.code, 'label', c.label) ORDER BY c.code)
@@ -79,7 +82,13 @@ async function toReport(row: ReportRow, storage: Storage): Promise<Report> {
     description: row.description,
     location: { latitude: row.latitude, longitude: row.longitude },
     difficultyTier: row.difficulty_tier,
-    estimatedBagCount: row.estimated_bag_count,
+    estimatedVolume:
+      row.estimated_volume_min_gallons === null || row.estimated_volume_max_gallons === null
+        ? null
+        : volumeEstimate({
+            minGallons: row.estimated_volume_min_gallons,
+            maxGallons: row.estimated_volume_max_gallons,
+          }),
     categories: row.categories,
     hazards: row.hazards,
     photo: { id: row.photo_file_id, url: await storage.presignDownload(row.photo_key) },

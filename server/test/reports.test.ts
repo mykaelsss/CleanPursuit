@@ -3,7 +3,14 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { after, describe, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
-import { type FakeStorage, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
+import {
+  type FakeAnalyzer,
+  type FakeStorage,
+  fakeAnalyzer,
+  fakeStorage,
+  PNG_BYTES,
+  testEnv as env,
+} from './helpers.ts';
 
 // These tests run against the real database and clean up everything they create.
 // Run them with `infisical run -- npm test`; without DATABASE_URL they are skipped.
@@ -13,11 +20,11 @@ const createdUserIds: string[] = [];
 
 type App = Awaited<ReturnType<typeof buildApp>>;
 
-async function startApp(t: { after: (fn: () => Promise<unknown>) => void }) {
+async function startApp(t: { after: (fn: () => Promise<unknown>) => void }, analyzer: FakeAnalyzer = fakeAnalyzer()) {
   const storage = fakeStorage();
-  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage });
+  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer });
   t.after(() => app.close());
-  return { app, storage };
+  return { app, storage, analyzer };
 }
 
 async function signUp(app: App) {
@@ -72,7 +79,7 @@ describe('reports and quests', { skip }, () => {
           OR report_id IN (SELECT id FROM report WHERE reporter_user_id = ANY($1))`,
       users,
     );
-    // Tags go with the report (ON DELETE CASCADE).
+    // Tags go with the report, and photo analyses with the file (ON DELETE CASCADE).
     await pool.query('DELETE FROM report WHERE reporter_user_id = ANY($1)', users);
     await pool.query('DELETE FROM file WHERE uploaded_by_user_id = ANY($1)', users);
     await pool.query('DELETE FROM app_user WHERE id = ANY($1)', users);
@@ -122,7 +129,7 @@ describe('reports and quests', { skip }, () => {
       location: spot,
       categories: ['glass', 'plastic', 'glass'],
       hazards: ['broken_glass'],
-      estimatedBagCount: 2,
+      estimatedVolume: { minGallons: 20, maxGallons: 30 },
     });
     assert.equal(res.statusCode, 201);
     const report = res.json();
@@ -133,6 +140,8 @@ describe('reports and quests', { skip }, () => {
       ['glass', 'plastic'],
     );
     assert.equal(report.hazards[0].code, 'broken_glass');
+    assert.equal(report.estimatedVolume.minGallons, 20);
+    assert.deepEqual(report.estimatedVolume.bags[0], { size: 'kitchen', gallons: 13, min: 2, max: 3 });
     assert.equal(report.reporter.id, userId);
     assert.equal(report.duplicateOf, null);
     assert.equal(report.questId, null);
@@ -271,6 +280,112 @@ describe('reports and quests', { skip }, () => {
     assert.equal(detail.json().report.hazards[0].requiresDropoff, true);
   });
 
+  test('a photo is analyzed once, and only by its uploader', async (t) => {
+    const { app, storage, analyzer } = await startApp(
+      t,
+      fakeAnalyzer({
+        categories: ['glass', 'plastic'],
+        hazards: ['broken_glass'],
+        estimatedVolume: { minGallons: 104, maxGallons: 156 },
+      }),
+    );
+    const owner = await signUp(app);
+    const other = await signUp(app);
+    const fileId = await uploadPhoto(app, storage, owner.authorization);
+    const analyze = (authorization: string, id = fileId) =>
+      app.inject({ method: 'POST', url: `/files/${id}/analysis`, headers: { authorization } });
+
+    const first = await analyze(owner.authorization);
+    assert.equal(first.statusCode, 200);
+    const analysis = first.json();
+    assert.equal(analysis.fileId, fileId);
+    assert.equal(analysis.showsLitter, true);
+    assert.deepEqual(analysis.categories, ['glass', 'plastic']);
+    assert.deepEqual(analysis.hazards, ['broken_glass']);
+    assert.deepEqual(analysis.estimatedVolume, {
+      minGallons: 104,
+      maxGallons: 156,
+      bags: [
+        { size: 'kitchen', gallons: 13, min: 8, max: 12 },
+        { size: 'large', gallons: 33, min: 4, max: 5 },
+        { size: 'contractor', gallons: 42, min: 3, max: 4 },
+      ],
+    });
+    assert.equal(analysis.terrain, 'grass');
+    assert.equal(analysis.model, 'test-model');
+
+    // Gemini sees the photo and picks from the tag lists in the database.
+    assert.equal(analyzer.calls.length, 1);
+    assert.deepEqual(analyzer.calls[0]!.image, PNG_BYTES);
+    assert.equal(analyzer.calls[0]!.contentType, 'image/png');
+    assert.ok(analyzer.calls[0]!.categories.some((tag) => tag.code === 'plastic'));
+    assert.ok(analyzer.calls[0]!.hazards.some((tag) => tag.code === 'sharps'));
+
+    const again = await analyze(owner.authorization);
+    assert.equal(again.statusCode, 200);
+    assert.deepEqual(again.json(), analysis);
+    assert.equal(analyzer.calls.length, 1);
+
+    const someoneElses = await analyze(other.authorization);
+    assert.equal(someoneElses.statusCode, 404);
+    assert.equal(someoneElses.json().code, 'FILE_NOT_FOUND');
+
+    const missing = await analyze(owner.authorization, randomUUID());
+    assert.equal(missing.statusCode, 404);
+  });
+
+  test('when Gemini fails, analysis returns 503 and saves nothing', async (t) => {
+    const { app, storage } = await startApp(t, fakeAnalyzer({}, new Error('quota exceeded')));
+    const { authorization } = await signUp(app);
+    const fileId = await uploadPhoto(app, storage, authorization);
+
+    const res = await app.inject({ method: 'POST', url: `/files/${fileId}/analysis`, headers: { authorization } });
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.json().code, 'ANALYSIS_UNAVAILABLE');
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+    const saved = await pool.query('SELECT 1 FROM photo_analysis WHERE file_id = $1', [fileId]);
+    assert.equal(saved.rowCount, 0);
+  });
+
+  test("tags Gemini suggested and the reporter kept are recorded as Gemini's", async (t) => {
+    const { app, storage } = await startApp(
+      t,
+      fakeAnalyzer({ categories: ['glass', 'plastic'], hazards: ['broken_glass'] }),
+    );
+    const { authorization } = await signUp(app);
+    const photoFileId = await uploadPhoto(app, storage, authorization);
+    await app.inject({ method: 'POST', url: `/files/${photoFileId}/analysis`, headers: { authorization } });
+
+    // The reporter drops glass, adds metal and sharps.
+    const res = await postReport(app, authorization, {
+      photoFileId,
+      description: 'Bottles, cans and a needle by the bench',
+      location: randomSpot(),
+      categories: ['plastic', 'metal'],
+      hazards: ['broken_glass', 'sharps'],
+    });
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.json().difficultyTier, 'legendary');
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+    const tags = await pool.query(
+      `SELECT category_code AS code, source::text FROM report_category WHERE report_id = $1
+       UNION ALL
+       SELECT hazard_code, source::text FROM report_hazard WHERE report_id = $1
+       ORDER BY code`,
+      [res.json().id],
+    );
+    assert.deepEqual(tags.rows, [
+      { code: 'broken_glass', source: 'gemini' },
+      { code: 'metal', source: 'user' },
+      { code: 'plastic', source: 'gemini' },
+      { code: 'sharps', source: 'user' },
+    ]);
+  });
+
   test('report and quest errors', async (t) => {
     const { app, storage } = await startApp(t);
     const owner = await signUp(app);
@@ -281,6 +396,14 @@ describe('reports and quests', { skip }, () => {
     const unknownCategory = await postReport(app, owner.authorization, { ...base, photoFileId, categories: ['lava'] });
     assert.equal(unknownCategory.statusCode, 400);
     assert.equal(unknownCategory.json().code, 'UNKNOWN_CATEGORY');
+
+    const tooWide = await postReport(app, owner.authorization, {
+      ...base,
+      photoFileId,
+      estimatedVolume: { minGallons: 50, maxGallons: 150 },
+    });
+    assert.equal(tooWide.statusCode, 400);
+    assert.equal(tooWide.json().code, 'INVALID_VOLUME_RANGE');
 
     const unknownHazard = await postReport(app, owner.authorization, { ...base, photoFileId, hazards: ['lava'] });
     assert.equal(unknownHazard.statusCode, 400);
