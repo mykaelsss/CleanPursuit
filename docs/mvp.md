@@ -75,13 +75,32 @@ A group gets credit together, and a cleanup can take several tries.
 
 - A user submits a photo, location and description.
 - The location snaps to an H3 cell (resolution 10, about 75 m edge) stored as `area_id`.
+- The reporter picks trash categories and any hazards, and our rules set the difficulty tier from them (see [Difficulty tier](#difficulty-tier)).
 - If someone reports a spot that is already reported, the app tells them it exists.
   A new report is still saved and linked to the original as a duplicate.
+- A spot counts as already reported when an original report within 25 m still needs work: it has no quest yet, or its quest is open.
+  Once that quest is completed, cancelled or expired, a new report there starts fresh.
 - Duplicates heat up the hotspot map, but only distinct reporters count, so one person cannot heat a spot alone.
+
+### Difficulty tier
+
+The first rule that matches sets the tier:
+
+| Tier | When |
+| --- | --- |
+| Legendary | Sharps or biohazard |
+| Hard | Chemicals or broken glass, or 10 or more estimated bags |
+| Medium | Bulky items or electronics, or 4 or more estimated bags |
+| Easy | Anything else |
+
+The tags come from the reporter for now.
+Gemini will add its own tags, and the tier is recomputed from all of them, so Gemini never sets the tier directly.
+The tier stays provisional until a party ends, when the leader can correct the tags.
 
 ### Quest
 
 - An original report can become one quest: the problem to solve.
+- Any signed-in user can create the quest, not only the reporter.
 - The person who creates the quest is raising awareness, not organizing.
   They are asked if they want to join a party, but they do not have to.
 
@@ -187,7 +206,7 @@ Aggregates are real-time and the daily ones refresh every 5 minutes, so the demo
 The core loop ships first so there is always a working demo.
 
 1. Set up the project, the Tiger Data schema and the activity-log hypertable with area snapping. (Done)
-2. Report and quest creation, with photo upload.
+2. Report and quest creation, with photo upload. (API done)
 3. Map and list views, plus party sign-up and check-in.
 4. Ending a party with bag count and after photo, then XP and the leaderboard.
 5. Gemini photo analysis, the tier rules and the equipment lookup.
@@ -212,6 +231,7 @@ The core loop ships first so there is always a working demo.
 Done:
 
 - Schema migrations `001` and `002` are applied to the DEV Tiger service and tested.
+- API: auth, photo uploads to R2, reports with duplicate detection and difficulty tiers, and quests.
 
 Open:
 

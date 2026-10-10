@@ -14,15 +14,21 @@ import {
 import type pg from 'pg';
 import type { Env } from './env.ts';
 import { HttpError } from './lib/errors.ts';
+import type { Storage } from './lib/storage.ts';
 import auth from './plugins/auth.ts';
 import db from './plugins/db.ts';
+import storage from './plugins/storage.ts';
 import authRoutes from './routes/auth.ts';
+import fileRoutes from './routes/files.ts';
 import healthRoutes from './routes/health.ts';
 import meRoutes from './routes/me.ts';
+import questRoutes from './routes/quests.ts';
+import reportRoutes from './routes/reports.ts';
 
 export interface BuildAppOptions {
   env: Env;
   pool: pg.Pool;
+  storage: Storage;
 }
 
 function loggerOptions(env: Env): FastifyServerOptions['logger'] {
@@ -32,7 +38,7 @@ function loggerOptions(env: Env): FastifyServerOptions['logger'] {
   return { level: env.LOG_LEVEL };
 }
 
-export async function buildApp({ env, pool }: BuildAppOptions) {
+export async function buildApp({ env, pool, storage: objectStorage }: BuildAppOptions) {
   const app = Fastify({ logger: loggerOptions(env) }).withTypeProvider<ZodTypeProvider>();
 
   // Zod schemas validate requests and shape responses, so undeclared fields never leave the API.
@@ -80,10 +86,14 @@ export async function buildApp({ env, pool }: BuildAppOptions) {
   }
 
   await app.register(db, { pool });
+  await app.register(storage, { storage: objectStorage });
   await app.register(auth, { jwtSecret: env.JWT_SECRET });
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(meRoutes);
+  await app.register(fileRoutes);
+  await app.register(reportRoutes);
+  await app.register(questRoutes);
 
   return app;
 }

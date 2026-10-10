@@ -44,6 +44,8 @@ Only the party leader ends a party, and XP goes to checked-in members when it en
 - Shared plugins are wrapped in `fastify-plugin`; route plugins are not.
 - Protect a route with `onRequest: app.authenticate` and `security: [{ bearerAuth: [] }]`, then read the user id from `request.user.id`.
 - Throw `HttpError` with a stable `code` for expected failures, and declare those statuses with `errorSchema`.
+- Reach R2 only through `app.storage`, and return photos with `photoSchema` (file id and a presigned URL), never raw object keys.
+  Tests pass `fakeStorage()` from `test/helpers.ts`, so they never touch R2.
 - Add new environment variables to `src/env.ts` and `.env.example` in the same change.
 - Run `npm run typecheck` and `infisical run -- npm test` in `server/` before committing.
 

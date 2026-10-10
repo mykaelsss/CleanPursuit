@@ -9,6 +9,11 @@ const envSchema = z.object({
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
   // Signs access tokens. Generate with `openssl rand -base64 32`.
   JWT_SECRET: z.string().min(32, 'Use at least 32 characters, for example from `openssl rand -base64 32`'),
+  // Cloudflare R2, for photos. The API token needs Object Read & Write on this bucket only.
+  R2_ACCOUNT_ID: z.string().min(1),
+  R2_ACCESS_KEY_ID: z.string().min(1),
+  R2_SECRET_ACCESS_KEY: z.string().min(1),
+  R2_BUCKET: z.string().min(1),
 });
 
 export type Env = z.infer<typeof envSchema>;

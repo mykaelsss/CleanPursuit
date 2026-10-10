@@ -1,5 +1,6 @@
 import type pg from 'pg';
 import type { Env } from '../src/env.ts';
+import type { Storage } from '../src/lib/storage.ts';
 
 export const testEnv: Env = {
   NODE_ENV: 'test',
@@ -8,8 +9,38 @@ export const testEnv: Env = {
   LOG_LEVEL: 'silent',
   DATABASE_URL: process.env.DATABASE_URL ?? 'postgres://unused',
   JWT_SECRET: 'test-secret-that-is-only-used-in-tests',
+  R2_ACCOUNT_ID: 'test',
+  R2_ACCESS_KEY_ID: 'test',
+  R2_SECRET_ACCESS_KEY: 'test',
+  R2_BUCKET: 'test',
 };
 
 export function fakePool(query: () => Promise<unknown> = async () => ({ rows: [] })): pg.Pool {
   return { query, on: () => {}, end: async () => {} } as unknown as pg.Pool;
 }
+
+export interface FakeStorage extends Storage {
+  // Stands in for the app's PUT to the upload URL.
+  put(key: string, contentType: string, body: Uint8Array): void;
+  has(key: string): boolean;
+}
+
+// In-memory object storage, so tests never touch R2.
+export function fakeStorage(): FakeStorage {
+  const objects = new Map<string, { contentType: string; body: Uint8Array }>();
+  return {
+    put: (key, contentType, body) => void objects.set(key, { contentType, body }),
+    has: (key) => objects.has(key),
+    presignUpload: async (key) => `https://storage.test/upload/${key}`,
+    presignDownload: async (key) => `https://storage.test/${key}`,
+    head: async (key) => {
+      const object = objects.get(key);
+      return object ? { contentType: object.contentType, sizeBytes: object.body.length } : null;
+    },
+    readStart: async (key, length) => objects.get(key)?.body.slice(0, length) ?? new Uint8Array(),
+    remove: async (key) => void objects.delete(key),
+  };
+}
+
+// The first bytes of a PNG, followed by padding. Enough to pass the format check.
+export const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2, 3, 4]);

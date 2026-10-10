@@ -30,3 +30,6 @@ export function toUser(row: UserRow): User {
     createdAt: row.created_at.toISOString(),
   };
 }
+
+// How other resources refer to a user: no email or XP.
+export const userSummarySchema = userSchema.pick({ id: true, username: true });

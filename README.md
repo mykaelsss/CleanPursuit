@@ -24,7 +24,7 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 | --- | --- |
 | Database | Migrations 001 and 002 applied to the DEV Tiger Data service |
 | App | Expo starter project in `app/` |
-| API | Fastify in `server/` with a health check and auth (register, login, refresh, logout, `/me`) |
+| API | Fastify in `server/` with auth, photo uploads, reports and quests |
 
 ## Tech stack
 
@@ -119,6 +119,32 @@ The API handles accounts itself.
 - In the app, keep the refresh token in `expo-secure-store` and the access token in memory only.
 
 Passwords are hashed with argon2id, and login, registration and refresh are rate limited to 10 requests per minute per IP.
+
+## Photos
+
+Photos go straight from the phone to Cloudflare R2, so they never pass through the API.
+
+1. `POST /uploads` with the content type and exact size returns a short-lived upload URL.
+2. The app PUTs the photo to that URL with the returned headers.
+3. `POST /files` with the key confirms the upload and returns a file id.
+   The API checks the stored size and the file's first bytes before accepting it.
+4. Attach the file id to a report (`photoFileId`) or, later, a party.
+
+JPEG, PNG and WebP up to 10 MB are accepted.
+Convert iPhone HEIC photos to JPEG in the app, and shrink them first to save upload time.
+Photo URLs in responses expire after an hour, so cache images by file id rather than by URL.
+
+## Reports and quests
+
+- `GET /tags` lists the trash categories and hazards for the report form.
+- `POST /reports` files a report.
+  The difficulty tier comes from the tags, using the rules in [docs/mvp.md](docs/mvp.md#difficulty-tier).
+  If the spot is already reported, the report is still saved and `duplicateOf` points at the original and its quest.
+- `POST /reports/{id}/quest` turns an original report into a quest.
+- `GET /quests?latitude=&longitude=` lists open quests nearby, nearest first, for the map and list.
+- `GET /reports/{id}` and `GET /quests/{id}` return one of each.
+
+The full request and response shapes are in the interactive docs at `/docs`.
 
 ## Secrets
 

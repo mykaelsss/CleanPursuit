@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildApp } from '../src/app.ts';
-import { fakePool, testEnv as env } from './helpers.ts';
+import { fakePool, fakeStorage, testEnv as env } from './helpers.ts';
 
 test('GET /health reports ok when the database answers', async (t) => {
-  const app = await buildApp({ env, pool: fakePool(async () => ({ rows: [{ '?column?': 1 }] })) });
+  const app = await buildApp({
+    env,
+    pool: fakePool(async () => ({ rows: [{ '?column?': 1 }] })),
+    storage: fakeStorage(),
+  });
   t.after(() => app.close());
 
   const res = await app.inject({ method: 'GET', url: '/health' });
@@ -19,6 +23,7 @@ test('GET /health reports 503 when the database is unreachable', async (t) => {
     pool: fakePool(async () => {
       throw new Error('connection refused');
     }),
+    storage: fakeStorage(),
   });
   t.after(() => app.close());
 
@@ -29,7 +34,7 @@ test('GET /health reports 503 when the database is unreachable', async (t) => {
 });
 
 test('unknown routes return 404', async (t) => {
-  const app = await buildApp({ env, pool: fakePool() });
+  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage() });
   t.after(() => app.close());
 
   const res = await app.inject({ method: 'GET', url: '/nope' });

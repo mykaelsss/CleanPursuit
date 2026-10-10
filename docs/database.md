@@ -84,7 +84,7 @@ erDiagram
 | --- | --- |
 | `app_user` | One row per account. Holds `username`, `email`, the argon2id `password_hash`, an optional avatar, and `total_xp` (the all-time leaderboard). |
 | `refresh_token` | Refresh tokens for JWT auth. Stores only a hash. `replaced_by_id` chains rotations so token reuse can be detected and the chain revoked. |
-| `file` | One row per object in Cloudflare R2: `key`, `content_type` (images only), `size_bytes`, uploader. Owners point at files; files never point at owners. |
+| `file` | One row per object in Cloudflare R2: `key`, `content_type` (images only), `size_bytes`, uploader. Owners point at files; files never point at owners. The API writes a row only after checking the uploaded object. |
 
 ### Reports and tags
 
@@ -234,6 +234,7 @@ CALL refresh_continuous_aggregate('report_daily_by_area_reporter', NULL, NULL);
 - Seed a few months of backdated demo data for one region, plus hand-verified drop-offs.
 - Add a dashboard aggregate; it needs `area_id` on party events.
 - Decide where Gemini results are stored (likely a 1:1 `report_analysis` table).
+- Clean up R2 objects that were uploaded but never confirmed, and `file` rows that were never attached to anything.
 - Guild leaderboard, later.
 - Verify Tiger's TLS certificate in the API by trusting Timescale's CA.
   For now the API reads `sslmode=require` the way `psql` does, so the connection is encrypted but the certificate is not checked.
