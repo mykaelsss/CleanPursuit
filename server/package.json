@@ -10,7 +10,8 @@
     "dev": "node --env-file-if-exists=.env --watch src/server.ts",
     "start": "node src/server.ts",
     "typecheck": "tsc",
-    "test": "node --test 'test/**/*.test.ts'"
+    "test": "node --test 'test/**/*.test.ts'",
+    "try:analysis": "node scripts/try-analysis.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1149.0",
@@ -20,6 +21,7 @@
     "@fastify/rate-limit": "^11.2.1",
     "@fastify/swagger": "^9.9.2",
     "@fastify/swagger-ui": "^6.1.2",
+    "@google/genai": "^2.28.0",
     "@node-rs/argon2": "^2.2.2",
     "fastify": "^5.12.5",
     "fastify-plugin": "^6.0.0",

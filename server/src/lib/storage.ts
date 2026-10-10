@@ -25,6 +25,7 @@ export interface Storage {
   presignDownload(key: string): Promise<string>;
   // Null when the object does not exist.
   head(key: string): Promise<StoredObject | null>;
+  read(key: string): Promise<Uint8Array>;
   readStart(key: string, length: number): Promise<Uint8Array>;
   remove(key: string): Promise<void>;
 }
@@ -70,6 +71,11 @@ export function createR2Storage({ accountId, accessKeyId, secretAccessKey, bucke
         if (err instanceof NotFound) return null;
         throw err;
       }
+    },
+
+    async read(key) {
+      const result = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      return result.Body ? result.Body.transformToByteArray() : new Uint8Array();
     },
 
     async readStart(key, length) {
