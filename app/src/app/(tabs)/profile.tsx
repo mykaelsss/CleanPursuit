@@ -6,60 +6,72 @@ import BountyPoster from "@/components/bounty-poster";
 import ScreenLayout from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { useTheme } from "@/hooks/use-theme";
+import { useAuth } from "@/lib/auth";
 
 export default function ProfileScreen() {
   const theme = useTheme();
+  const { user } = useAuth();
 
-  const player = {
-    name: "Staceyann King",
-    initials: "SK",
-    title: "Neighborhood Explorer",
-    level: 1,
-    xp: 0,
-    nextLevelXp: 100,
-  };
+  // The tabs only render while signed in, but the user can briefly be null.
+  if (!user) return null;
 
-  const progress =
-    player.nextLevelXp > 0
-      ? Math.min(Math.max(player.xp / player.nextLevelXp, 0), 1)
-      : 0;
+  const { level } = user;
+  const next = level.xpForNextLevel;
+  const atMaxLevel = next === null;
+  const progress = atMaxLevel
+    ? 1
+    : Math.min(Math.max(level.xpIntoLevel / next, 0), 1);
+  const progressText = atMaxLevel
+    ? "Max level"
+    : `${level.xpIntoLevel} / ${next} XP`;
+  const memberSince = new Date(user.createdAt).toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
 
   return (
     <ScreenLayout
       title="Profile"
       headerContent={
         <BountyPoster
-          name={player.name}
-          initials={player.initials}
-          title={player.title}
-          bounty={player.xp}
+          name={user.username}
+          initials={user.username.slice(0, 2).toUpperCase()}
+          title="Neighborhood Explorer"
+          bounty={user.totalXp}
         />
       }
     >
       <View style={styles.playerHeading}>
         <View style={styles.details}>
-          <ThemedText type="subtitle">{player.name}</ThemedText>
+          <ThemedText type="subtitle">{user.username}</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            Member since {memberSince}
+          </ThemedText>
         </View>
 
-        <AppBadge label={`LEVEL ${player.level}`} />
+        <AppBadge label={`LEVEL ${level.number}`} />
       </View>
 
       <AppCard
         title="Adventure progress"
         rightContent={
           <ThemedText type="small" themeColor="textSecondary">
-            {player.xp} / {player.nextLevelXp} XP
+            {progressText}
           </ThemedText>
         }
       >
         <View
           accessibilityRole="progressbar"
-          accessibilityLabel="Progress toward the next level"
+          accessibilityLabel={
+            atMaxLevel ? "Max level reached" : "Progress toward the next level"
+          }
           accessibilityValue={{
             min: 0,
             max: 100,
             now: Math.round(progress * 100),
-            text: `${player.xp} of ${player.nextLevelXp} XP`,
+            text: atMaxLevel
+              ? "Max level"
+              : `${level.xpIntoLevel} of ${next} XP`,
           }}
           style={[
             styles.progressTrack,
@@ -78,14 +90,9 @@ export default function ProfileScreen() {
         </View>
 
         <ThemedText type="small" themeColor="textSecondary">
-          Complete cleanup quests to earn XP and level up.
-        </ThemedText>
-      </AppCard>
-
-      <AppCard title="About me">
-        <ThemedText>
-          Hi! I’m Staceyann. Let’s explore NYC, take on cleanup quests, and make
-          our neighborhoods cleaner.
+          {atMaxLevel
+            ? "You reached the top level. Your XP still counts on the leaderboards."
+            : "Complete cleanup quests to earn XP and level up."}
         </ThemedText>
       </AppCard>
     </ScreenLayout>
