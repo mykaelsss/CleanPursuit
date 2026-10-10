@@ -130,7 +130,16 @@ try {
       console.log(`  description   ${analysis.description}`);
       console.log(`  categories    ${list(analysis.categories)}`);
       console.log(`  hazards       ${list(analysis.hazards)}`);
-      console.log(`  bags          ${analysis.estimatedBagCount ?? '-'}`);
+      const volume = analysis.estimatedVolume;
+      const span = (min: number, max: number) => (min === max ? `${min}` : `${min}-${max}`);
+      if (volume) {
+        const bags = volume.bags.map((bag: { size: string; min: number; max: number }) => `${span(bag.min, bag.max)} ${bag.size}`);
+        const unit = volume.maxGallons === 1 ? 'gallon' : 'gallons';
+        console.log(`  volume        ${span(volume.minGallons, volume.maxGallons)} ${unit}`);
+        console.log(`  bags          ${bags.join(', ')}`);
+      } else {
+        console.log('  volume        -');
+      }
       console.log(`  terrain       ${analysis.terrain}`);
       console.log(
         `  took ${seconds}s, ${usage.rows[0]!.input_tokens} input and ${usage.rows[0]!.output_tokens} output tokens`,

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { type Tag, type Terrain, terrainSchema } from '../lib/analyzer.ts';
 import { errorSchema, HttpError } from '../lib/errors.ts';
 import type { ImageType } from '../lib/images.ts';
+import { volumeEstimate, volumeEstimateSchema } from '../lib/volume.ts';
 import { perUserRateLimit } from '../lib/rate-limit.ts';
 
 const security = [{ bearerAuth: [] }];
@@ -13,7 +14,9 @@ const photoAnalysisSchema = z.object({
   description: z.string().describe('Suggested report description'),
   categories: z.array(z.string()).describe('Suggested category codes from GET /tags'),
   hazards: z.array(z.string()).describe('Suggested hazard codes from GET /tags'),
-  estimatedBagCount: z.number().int().nullable(),
+  estimatedVolume: volumeEstimateSchema
+    .nullable()
+    .describe('Suggested trash amount, with bag counts for common bag sizes; null when there is no litter'),
   terrain: terrainSchema,
   model: z.string(),
   createdAt: z.iso.datetime(),
@@ -27,14 +30,15 @@ interface AnalysisRow {
   description: string;
   category_codes: string[];
   hazard_codes: string[];
-  estimated_bag_count: number | null;
+  estimated_volume_min_gallons: number | null;
+  estimated_volume_max_gallons: number | null;
   terrain: Terrain;
   model: string;
   created_at: Date;
 }
 
-const ANALYSIS_COLUMNS = `file_id, shows_litter, description, category_codes, hazard_codes, estimated_bag_count,
-                          terrain, model, created_at`;
+const ANALYSIS_COLUMNS = `file_id, shows_litter, description, category_codes, hazard_codes,
+                          estimated_volume_min_gallons, estimated_volume_max_gallons, terrain, model, created_at`;
 
 function toAnalysis(row: AnalysisRow): PhotoAnalysis {
   return {
@@ -43,7 +47,13 @@ function toAnalysis(row: AnalysisRow): PhotoAnalysis {
     description: row.description,
     categories: row.category_codes,
     hazards: row.hazard_codes,
-    estimatedBagCount: row.estimated_bag_count,
+    estimatedVolume:
+      row.estimated_volume_min_gallons === null || row.estimated_volume_max_gallons === null
+        ? null
+        : volumeEstimate({
+            minGallons: row.estimated_volume_min_gallons,
+            maxGallons: row.estimated_volume_max_gallons,
+          }),
     terrain: row.terrain,
     model: row.model,
     createdAt: row.created_at.toISOString(),
@@ -60,7 +70,7 @@ const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
         tags: ['files'],
         summary: 'Suggest report tags for an uploaded photo',
         description:
-          'Gemini looks at the photo and suggests a description, categories, hazards and a bag count to prefill the ' +
+          'Gemini looks at the photo and suggests a description, categories, hazards and a trash amount to prefill the ' +
           'report form. The reporter confirms or edits them before `POST /reports`. ' +
           'Each photo is analyzed once; calling again returns the same result. ' +
           'On 503 `ANALYSIS_UNAVAILABLE`, show the form empty.',
@@ -115,8 +125,9 @@ const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
       const { analysis } = result;
       const inserted = await app.db.query<AnalysisRow>(
         `INSERT INTO photo_analysis (file_id, model, shows_litter, description, category_codes, hazard_codes,
-                                     estimated_bag_count, terrain, input_tokens, output_tokens, latency_ms)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                                     estimated_volume_min_gallons, estimated_volume_max_gallons, terrain,
+                                     input_tokens, output_tokens, latency_ms)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          ON CONFLICT (file_id) DO NOTHING
          RETURNING ${ANALYSIS_COLUMNS}`,
         [
@@ -126,7 +137,8 @@ const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
           analysis.description,
           analysis.categories,
           analysis.hazards,
-          analysis.estimatedBagCount,
+          analysis.estimatedVolume?.minGallons ?? null,
+          analysis.estimatedVolume?.maxGallons ?? null,
           analysis.terrain,
           result.inputTokens,
           result.outputTokens,

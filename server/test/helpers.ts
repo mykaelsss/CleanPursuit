@@ -67,7 +67,7 @@ export function fakeAnalyzer(analysis: Partial<Analysis> = {}, error?: Error): F
           description: 'Plastic bottles by a bench.',
           categories: ['plastic'],
           hazards: [],
-          estimatedBagCount: 1,
+          estimatedVolume: { minGallons: 10, maxGallons: 15 },
           terrain: 'grass',
           ...analysis,
         },

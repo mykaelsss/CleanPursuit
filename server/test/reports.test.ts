@@ -129,7 +129,7 @@ describe('reports and quests', { skip }, () => {
       location: spot,
       categories: ['glass', 'plastic', 'glass'],
       hazards: ['broken_glass'],
-      estimatedBagCount: 2,
+      estimatedVolume: { minGallons: 20, maxGallons: 30 },
     });
     assert.equal(res.statusCode, 201);
     const report = res.json();
@@ -140,6 +140,8 @@ describe('reports and quests', { skip }, () => {
       ['glass', 'plastic'],
     );
     assert.equal(report.hazards[0].code, 'broken_glass');
+    assert.equal(report.estimatedVolume.minGallons, 20);
+    assert.deepEqual(report.estimatedVolume.bags[0], { size: 'kitchen', gallons: 13, min: 2, max: 3 });
     assert.equal(report.reporter.id, userId);
     assert.equal(report.duplicateOf, null);
     assert.equal(report.questId, null);
@@ -281,7 +283,11 @@ describe('reports and quests', { skip }, () => {
   test('a photo is analyzed once, and only by its uploader', async (t) => {
     const { app, storage, analyzer } = await startApp(
       t,
-      fakeAnalyzer({ categories: ['glass', 'plastic'], hazards: ['broken_glass'], estimatedBagCount: 3 }),
+      fakeAnalyzer({
+        categories: ['glass', 'plastic'],
+        hazards: ['broken_glass'],
+        estimatedVolume: { minGallons: 104, maxGallons: 156 },
+      }),
     );
     const owner = await signUp(app);
     const other = await signUp(app);
@@ -296,7 +302,15 @@ describe('reports and quests', { skip }, () => {
     assert.equal(analysis.showsLitter, true);
     assert.deepEqual(analysis.categories, ['glass', 'plastic']);
     assert.deepEqual(analysis.hazards, ['broken_glass']);
-    assert.equal(analysis.estimatedBagCount, 3);
+    assert.deepEqual(analysis.estimatedVolume, {
+      minGallons: 104,
+      maxGallons: 156,
+      bags: [
+        { size: 'kitchen', gallons: 13, min: 8, max: 12 },
+        { size: 'large', gallons: 33, min: 4, max: 5 },
+        { size: 'contractor', gallons: 42, min: 3, max: 4 },
+      ],
+    });
     assert.equal(analysis.terrain, 'grass');
     assert.equal(analysis.model, 'test-model');
 
@@ -382,6 +396,14 @@ describe('reports and quests', { skip }, () => {
     const unknownCategory = await postReport(app, owner.authorization, { ...base, photoFileId, categories: ['lava'] });
     assert.equal(unknownCategory.statusCode, 400);
     assert.equal(unknownCategory.json().code, 'UNKNOWN_CATEGORY');
+
+    const tooWide = await postReport(app, owner.authorization, {
+      ...base,
+      photoFileId,
+      estimatedVolume: { minGallons: 50, maxGallons: 150 },
+    });
+    assert.equal(tooWide.statusCode, 400);
+    assert.equal(tooWide.json().code, 'INVALID_VOLUME_RANGE');
 
     const unknownHazard = await postReport(app, owner.authorization, { ...base, photoFileId, hazards: ['lava'] });
     assert.equal(unknownHazard.statusCode, 400);

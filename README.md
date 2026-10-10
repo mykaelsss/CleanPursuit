@@ -22,7 +22,7 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 
 | Part | State |
 | --- | --- |
-| Database | Migrations 001 to 003 applied to the DEV Tiger Data service |
+| Database | Migrations 001 to 004 applied to the DEV Tiger Data service |
 | App | Expo starter project in `app/` |
 | API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports and quests |
 
@@ -95,11 +95,11 @@ Add packages with `npx expo install <package>` so versions match the Expo SDK.
 ### Apply database migrations
 
 Migrations run in order against the Tiger Data service, one file at a time.
-Only run files that have not been applied yet; 001 to 003 are already on the DEV service.
+Only run files that have not been applied yet; 001 to 004 are already on the DEV service.
 The connection string comes from Infisical, so wrap the command in `infisical run`:
 
 ```bash
-infisical run -- sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/db/migrations/004_example.sql'
+infisical run -- sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/db/migrations/005_example.sql'
 ```
 
 The single quotes matter: `$DATABASE_URL` must expand inside the command Infisical runs, not in your shell.
@@ -137,11 +137,15 @@ Photo URLs in responses expire after an hour, so cache images by file id rather 
 ## Reports and quests
 
 - `GET /tags` lists the trash categories and hazards for the report form.
-- `POST /files/{id}/analysis` asks Gemini to suggest a description, categories, hazards and a bag count for an uploaded photo.
+- `POST /files/{id}/analysis` asks Gemini to suggest a description, categories, hazards and a trash amount for an uploaded photo.
   Call it right after `POST /files` and prefill the report form with the result while the reporter fills in the rest.
   Each photo is analyzed once; calling again returns the saved result.
   If `showsLitter` is false, warn the reporter but let them continue.
   On 503 `ANALYSIS_UNAVAILABLE`, show the form empty; reporting never depends on Gemini.
+- Trash amounts are a range in gallons (`estimatedVolume: { minGallons, maxGallons }`), and responses add `bags` with counts for kitchen (13 gal), large (33 gal) and contractor (42 gal) bags.
+  Show those so volunteers know what to bring.
+  The high end may be at most 1.5 times the low end (or one kitchen bag above it); wider ranges get 400 `INVALID_VOLUME_RANGE`.
+  See [Trash amount](docs/mvp.md#trash-amount).
 - `POST /reports` files a report.
   The difficulty tier comes from the tags the reporter sends, using the rules in [docs/mvp.md](docs/mvp.md#difficulty-tier).
   Tags that Gemini suggested and the reporter kept are recorded with `gemini` as their source.

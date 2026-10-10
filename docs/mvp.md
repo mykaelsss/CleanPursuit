@@ -44,7 +44,7 @@ The demo works end to end with these six features.
 
 - **Gemini photo analysis.**
   One call per report photo, made right after upload, before the report is sent.
-  Gemini returns structured JSON: whether the photo shows litter, a suggested description, trash categories from a fixed list, hazard flags, estimated bag count and terrain.
+  Gemini returns structured JSON: whether the photo shows litter, a suggested description, trash categories from a fixed list, hazard flags, a trash volume range and terrain.
   The report form opens prefilled, the reporter confirms or edits it, and our own rules map the tags to a difficulty tier: easy, medium, hard or legendary.
 - **Equipment and warnings lookup.**
   Tables keyed by trash category and hazard, so Gemini is never called again for gear lists.
@@ -75,7 +75,7 @@ A group gets credit together, and a cleanup can take several tries.
 
 - A user submits a photo, location and description.
 - The location snaps to an H3 cell (resolution 10, about 75 m edge) stored as `area_id`.
-- Gemini looks at the photo as soon as it is uploaded and prefills the form with a description, trash categories, hazards and a bag count.
+- Gemini looks at the photo as soon as it is uploaded and prefills the form with a description, trash categories, hazards and a trash amount (see [Trash amount](#trash-amount)).
 - The reporter confirms or edits the categories and any hazards, and our rules set the difficulty tier from them (see [Difficulty tier](#difficulty-tier)).
 - If Gemini is slow or down, the form starts empty and the reporter fills it in by hand.
 - If someone reports a spot that is already reported, the app tells them it exists.
@@ -91,14 +91,31 @@ The first rule that matches sets the tier:
 | Tier | When |
 | --- | --- |
 | Legendary | Sharps or biohazard |
-| Hard | Chemicals or broken glass, or 10 or more estimated bags |
-| Medium | Bulky items or electronics, or 4 or more estimated bags |
+| Hard | Chemicals or broken glass, or 10 or more kitchen bags of trash |
+| Medium | Bulky items or electronics, or 4 or more kitchen bags of trash |
 | Easy | Anything else |
 
-The tags are the ones the reporter submits, after Gemini's suggestions prefill the form.
+The tags and trash amount are the ones the reporter submits, after Gemini's suggestions prefill the form.
 Gemini never sets the tier directly, and it never adds a tag the reporter did not see.
 Each tag records whether it came from Gemini or the reporter.
 The tier stays provisional until a party ends, when the leader can correct the tags.
+
+### Trash amount
+
+A report estimates how much trash there is as a low and high volume in US gallons, such as 100-150 gallons.
+A single number looked more exact than it is: two Gemini models said 15 and 25 bags for the same photo.
+
+- Gemini suggests the range and the reporter confirms or changes it.
+- The API turns the range into bag counts for common bags, so volunteers can see what to bring with the bags they have.
+  For 100-150 gallons: 8-12 kitchen bags (13 gal), 4-5 large trash bags (33 gal) or 3-4 contractor bags (42 gal).
+  Bag counts are arithmetic, never Gemini's guess.
+- A range must be tight: the high end is at most 1.5 times the low end, or at most one kitchen bag (13 gal) above it for small piles.
+  Gemini's ranges are narrowed around the same middle when they are wider, and the API rejects wider ranges from reporters.
+- The tier uses a point a third of the way up the range, so it leans toward the low end and inflating the high end counts for less.
+  For 104-156 gallons that point is about 9.3 kitchen bags, so the tier is medium, not hard.
+- Bulky items that do not fit in a bag are left out of the volume and flagged as `bulky_items` instead.
+- The range only estimates the job.
+  The bags actually collected come from the party leader when the party ends.
 
 ### Quest
 

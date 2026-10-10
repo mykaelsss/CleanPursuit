@@ -1,6 +1,7 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { z } from 'zod';
 import type { ImageType } from './images.ts';
+import { BAG_SIZES, MAX_VOLUME_GALLONS, sensibleRange, type VolumeRange } from './volume.ts';
 
 // Gemini gets this long to answer before the app falls back to an empty report form.
 export const ANALYSIS_TIMEOUT_MS = 20_000;
@@ -28,7 +29,8 @@ export interface Analysis {
   description: string;
   categories: string[];
   hazards: string[];
-  estimatedBagCount: number | null;
+  // Always a sensible range; null when there is no litter.
+  estimatedVolume: VolumeRange | null;
   terrain: Terrain;
 }
 
@@ -61,7 +63,6 @@ const HAZARD_HINTS: Record<string, string> = {
   bulky_items: 'furniture, mattresses, tires, appliances or anything too big for a trash bag',
 };
 
-const MAX_BAG_COUNT = 1000;
 const MAX_DESCRIPTION_LENGTH = 300;
 
 function outputSchema(categoryCodes: string[], hazardCodes: string[]) {
@@ -72,10 +73,8 @@ function outputSchema(categoryCodes: string[], hazardCodes: string[]) {
       .describe('One or two plain sentences saying what litter is where. No cleanup or handling instructions.'),
     categories: z.array(z.enum(categoryCodes)).describe('Every trash category clearly visible'),
     hazards: z.array(z.enum(hazardCodes)).describe('Every hazard visible or very likely'),
-    estimatedBagCount: z
-      .number()
-      .int()
-      .describe('How many standard 13-gallon trash bags the visible litter would fill; 0 if there is no litter'),
+    minGallons: z.number().int().describe('Low estimate of the visible litter volume in US gallons; 0 if none'),
+    maxGallons: z.number().int().describe('High estimate of the visible litter volume in US gallons; 0 if none'),
     terrain: terrainSchema.describe('The ground the litter is on'),
   });
 }
@@ -99,10 +98,13 @@ Rules:
 - Pick every category that is clearly visible. Use "mixed" only when the litter is too jumbled to tell apart.
 - Flag a hazard when you can see it or it is very likely.
   Flag sharps and biohazard even when you are only fairly sure, because a person checks every flag.
-- Count bulky items that will not fit in a bag as 0 bags and flag bulky_items instead.
+- Estimate how much space the visible litter would take up once bagged, in US gallons, as a low and a high estimate.
+  For scale: ${BAG_SIZES.map(({ size, gallons }) => `a ${size} trash bag holds ${gallons} gallons`).join(', ')}.
+  Keep the range tight: the high estimate should be at most 1.5 times the low one.
+- Leave bulky items that will not fit in a bag out of the volume and flag bulky_items instead.
 - Write the description for other volunteers, for example "Plastic bottles and food wrappers along a fence by a parking lot."
   Never give cleanup, handling or disposal instructions.
-- If the photo shows no litter, set showsLitter to false, leave categories and hazards empty and set estimatedBagCount to 0.`;
+- If the photo shows no litter, set showsLitter to false, leave categories and hazards empty and set both gallon estimates to 0.`;
 }
 
 export interface GeminiOptions {
@@ -153,14 +155,17 @@ export function createGeminiAnalyzer({ apiKey, model }: GeminiOptions): PhotoAna
       }
 
       const usage = response.usageMetadata;
-      const bags = Math.min(Math.max(parsed.estimatedBagCount, 0), MAX_BAG_COUNT);
+      const low = Math.min(Math.max(parsed.minGallons, 0), MAX_VOLUME_GALLONS);
+      const high = Math.min(Math.max(parsed.maxGallons, 0), MAX_VOLUME_GALLONS);
       return {
         analysis: {
           showsLitter: parsed.showsLitter,
           description: parsed.description.trim().slice(0, MAX_DESCRIPTION_LENGTH),
           categories: [...new Set(parsed.categories)].sort(),
           hazards: [...new Set(parsed.hazards)].sort(),
-          estimatedBagCount: bags > 0 ? bags : null,
+          // The model does not always keep the range tight, so narrow it here.
+          estimatedVolume:
+            low > 0 || high > 0 ? sensibleRange({ minGallons: Math.max(low, 1), maxGallons: Math.max(high, 1) }) : null,
           terrain: parsed.terrain,
         },
         model: response.modelVersion ?? model,

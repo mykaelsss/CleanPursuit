@@ -6,6 +6,7 @@ import { errorSchema, HttpError } from '../lib/errors.ts';
 import { geographyPoint, locationSchema } from '../lib/geo.ts';
 import { perUserRateLimit } from '../lib/rate-limit.ts';
 import { categorySchema, findReport, hazardSchema, reportSchema } from '../lib/reports.ts';
+import { isSensibleRange, volumeRangeSchema } from '../lib/volume.ts';
 
 // A new report this close to an unresolved original is linked to it as a duplicate.
 export const DUPLICATE_RADIUS_M = 25;
@@ -60,13 +61,22 @@ const reportRoutes: FastifyPluginAsyncZod = async (app) => {
           location: locationSchema,
           categories: z.array(tagCode).min(1).max(20).describe('Codes from GET /tags'),
           hazards: z.array(tagCode).max(20).default([]).describe('Codes from GET /tags'),
-          estimatedBagCount: z.number().int().min(1).max(1000).optional(),
+          estimatedVolume: volumeRangeSchema
+            .optional()
+            .describe('Low and high estimate in US gallons; the high end may be at most 1.5 times the low end'),
         }),
         response: { 201: reportSchema, 400: errorSchema, 401: errorSchema, 409: errorSchema, 429: errorSchema },
       },
     },
     async (request, reply) => {
-      const { photoFileId, description, location, estimatedBagCount } = request.body;
+      const { photoFileId, description, location, estimatedVolume } = request.body;
+      if (estimatedVolume && !isSensibleRange(estimatedVolume)) {
+        throw new HttpError(
+          400,
+          'INVALID_VOLUME_RANGE',
+          'Keep the high estimate between the low one and 1.5 times it (or one kitchen bag above it)',
+        );
+      }
       const categories = [...new Set(request.body.categories)];
       const hazards = [...new Set(request.body.hazards)];
       const userId = request.user.id;
@@ -103,8 +113,8 @@ const reportRoutes: FastifyPluginAsyncZod = async (app) => {
 
           const { rows } = await client.query<{ id: string }>(
             `INSERT INTO report (reporter_user_id, photo_file_id, description, location, duplicate_of_report_id,
-                                 difficulty_tier, estimated_bag_count)
-             VALUES ($1, $2, $3, ${geographyPoint(4, 5)}, $6, $7, $8)
+                                 difficulty_tier, estimated_volume_min_gallons, estimated_volume_max_gallons)
+             VALUES ($1, $2, $3, ${geographyPoint(4, 5)}, $6, $7, $8, $9)
              RETURNING id`,
             [
               userId,
@@ -113,8 +123,9 @@ const reportRoutes: FastifyPluginAsyncZod = async (app) => {
               location.longitude,
               location.latitude,
               original.rows[0]?.id ?? null,
-              difficultyTier({ categories, hazards, estimatedBagCount }),
-              estimatedBagCount ?? null,
+              difficultyTier({ categories, hazards, estimatedVolume }),
+              estimatedVolume?.minGallons ?? null,
+              estimatedVolume?.maxGallons ?? null,
             ],
           );
           const id = rows[0]!.id;
