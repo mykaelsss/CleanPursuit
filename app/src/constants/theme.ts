@@ -169,5 +169,8 @@ export const Spacing = {
   six: 64,
 } as const;
 
+// Platform guidelines ask for touch targets of at least 44pt (iOS) and 48dp (Android).
+export const MIN_TOUCH = 48;
+
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
