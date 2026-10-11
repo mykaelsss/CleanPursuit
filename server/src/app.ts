@@ -15,10 +15,12 @@ import type pg from 'pg';
 import type { Env } from './env.ts';
 import type { PhotoAnalyzer } from './lib/analyzer.ts';
 import { HttpError } from './lib/errors.ts';
+import type { PlaceFinder } from './lib/places.ts';
 import type { Storage } from './lib/storage.ts';
 import analyzer from './plugins/analyzer.ts';
 import auth from './plugins/auth.ts';
 import db from './plugins/db.ts';
+import places from './plugins/places.ts';
 import storage from './plugins/storage.ts';
 import analysisRoutes from './routes/analysis.ts';
 import authRoutes from './routes/auth.ts';
@@ -40,6 +42,7 @@ export interface BuildAppOptions {
   pool: pg.Pool;
   storage: Storage;
   analyzer: PhotoAnalyzer;
+  places: PlaceFinder;
 }
 
 function loggerOptions(env: Env): FastifyServerOptions['logger'] {
@@ -49,7 +52,13 @@ function loggerOptions(env: Env): FastifyServerOptions['logger'] {
   return { level: env.LOG_LEVEL };
 }
 
-export async function buildApp({ env, pool, storage: objectStorage, analyzer: photoAnalyzer }: BuildAppOptions) {
+export async function buildApp({
+  env,
+  pool,
+  storage: objectStorage,
+  analyzer: photoAnalyzer,
+  places: placeFinder,
+}: BuildAppOptions) {
   const app = Fastify({ logger: loggerOptions(env) }).withTypeProvider<ZodTypeProvider>();
 
   // Zod schemas validate requests and shape responses, so undeclared fields never leave the API.
@@ -100,6 +109,7 @@ export async function buildApp({ env, pool, storage: objectStorage, analyzer: ph
   await app.register(db, { pool });
   await app.register(storage, { storage: objectStorage });
   await app.register(analyzer, { analyzer: photoAnalyzer });
+  await app.register(places, { places: placeFinder });
   await app.register(auth, { jwtSecret: env.JWT_SECRET });
   await app.register(healthRoutes);
   await app.register(authRoutes);

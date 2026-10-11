@@ -8,6 +8,7 @@ const equipmentItemSchema = z.object({
   id: z.uuid(),
   name: z.string(),
   description: z.string().nullable(),
+  required: z.boolean().describe('Volunteers must bring it, such as a sharps container for sharps'),
 });
 
 const equipmentHazardSchema = z.object({
@@ -38,6 +39,7 @@ interface ItemRow {
   id: string;
   name: string;
   description: string | null;
+  required: boolean;
 }
 
 const equipmentRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -81,19 +83,30 @@ const equipmentRoutes: FastifyPluginAsyncZod = async (app) => {
       );
 
       const hazards = hazardResult.rows;
+      const hazardCodes = hazards.map((hazard) => hazard.code);
+
+      // Gear a hazard requires, such as the sharps container drop-off sites insist on, is always listed.
+      const requiredResult = await app.db.query<ItemRow>(
+        `SELECT DISTINCT i.id, i.name, i.description, true AS required
+         FROM hazard_item hi
+         JOIN item i ON i.id = hi.item_id
+         WHERE hi.hazard_code = ANY($1::text[]) AND hi.required
+         ORDER BY i.name, i.id`,
+        [hazardCodes],
+      );
       let items: ItemRow[] = [];
 
-      // Never recommend equipment for hazards that require professional
-      // drop-off or escalation.
+      // Beyond required gear, never recommend equipment for hazards that
+      // require drop-off or escalation.
       if (!hazards.some((hazard) => hazard.requiresDropoff)) {
         if (hazards.length > 0) {
           // When hazards are present, use only hazard-specific mappings.
           // If any reported hazard has no mapping, return no guessed gear.
           const result = await app.db.query<ItemRow>(
-            `SELECT DISTINCT i.id, i.name, i.description
+            `SELECT DISTINCT i.id, i.name, i.description, false AS required
              FROM hazard_item hi
              JOIN item i ON i.id = hi.item_id
-             WHERE hi.hazard_code = ANY($1::text[])
+             WHERE hi.hazard_code = ANY($1::text[]) AND NOT hi.required
                AND NOT EXISTS (
                  SELECT 1
                  FROM unnest($1::text[]) AS reported(code)
@@ -104,13 +117,13 @@ const equipmentRoutes: FastifyPluginAsyncZod = async (app) => {
                  )
                )
              ORDER BY i.name, i.id`,
-            [hazards.map((hazard) => hazard.code)],
+            [hazardCodes],
           );
           items = result.rows;
         } else {
           // With no reported hazards, use the ordinary category mappings.
           const result = await app.db.query<ItemRow>(
-            `SELECT DISTINCT i.id, i.name, i.description
+            `SELECT DISTINCT i.id, i.name, i.description, false AS required
              FROM report_category rc
              JOIN category_item ci ON ci.category_code = rc.category_code
              JOIN item i ON i.id = ci.item_id
@@ -122,9 +135,11 @@ const equipmentRoutes: FastifyPluginAsyncZod = async (app) => {
         }
       }
 
+      // Required gear first, and listed once.
+      const requiredIds = new Set(requiredResult.rows.map((item) => item.id));
       return {
         questId: request.params.id,
-        items,
+        items: [...requiredResult.rows, ...items.filter((item) => !requiredIds.has(item.id))],
         hazards,
       };
     },

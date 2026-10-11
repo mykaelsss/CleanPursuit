@@ -20,3 +20,16 @@ export function geographyPoint(longitudeParam: number, latitudeParam: number): s
 export function selectLocation(column: string): string {
   return `ST_Y(${column}::geometry) AS latitude, ST_X(${column}::geometry) AS longitude`;
 }
+
+const EARTH_RADIUS_M = 6_371_008.8;
+
+// Great-circle distance in meters. Within a fraction of a percent of PostGIS geography distances.
+export function distanceMeters(a: Location, b: Location): number {
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const dLat = toRadians(b.latitude - a.latitude);
+  const dLng = toRadians(b.longitude - a.longitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRadians(a.latitude)) * Math.cos(toRadians(b.latitude)) * Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
+}

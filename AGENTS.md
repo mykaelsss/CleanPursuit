@@ -10,6 +10,12 @@ People report litter, form parties to clean it up, and earn XP on leaderboards.
 
 Read the relevant doc before changing product behavior or the schema, and update it in the same change.
 
+## Region
+
+The app is scoped to New York City (the five boroughs) for now.
+Seed data, drop-off locations, escalation contacts (such as NYC 311) and the resources page all target NYC.
+Keep region-specific values in data or one config place rather than scattered through code, so another region can be added later.
+
 ## Stack
 
 - App: React Native
@@ -49,14 +55,20 @@ Only the party leader ends a party, and XP goes to checked-in members when it en
 - Reach Gemini only through `app.analyzer`, and only from `POST /files/{id}/analysis`, which saves the result so each photo is analyzed once.
   Gemini only suggests tags; the reporter confirms them and our rules set the tier.
   Tests pass `fakeAnalyzer()` from `test/helpers.ts`, so they never call Gemini.
+- Reach Google Places only through `app.places`, and only from the drop-off lookup in `lib/dropoffs.ts`.
+  Store only place IDs, never Places names, addresses or coordinates, and fetch details again when showing them.
+  Tests pass `fakePlaces()` from `test/helpers.ts`, so they never call Google.
+- Keep region-specific values (escalation contact, Places search query) in `src/lib/region.ts`.
 - Add new environment variables to `src/env.ts` and `.env.example` in the same change.
 - Run `npm run typecheck` and `infisical run -- npm test` in `server/` before committing.
 
 ## Rules
 
 - Never edit an applied migration; add a new numbered one.
-- Secrets (database URL, JWT secret, R2 and Gemini keys) live in Infisical, never in the repo.
+- Secrets (database URL, JWT secret, R2, Gemini and Google Maps keys) live in Infisical, never in the repo.
 - Never commit `.env` files; keep them in `.gitignore` and commit a `.env.example` that lists variable names only.
-- Never give sharps or biohazard handling instructions in app copy; point to drop-off and escalation.
+- For sharps and biohazard, app copy recommends calling 311 and warns volunteers to be extremely careful if they handle it themselves.
+  A sharps container is required gear for sharps.
+  Never give step-by-step handling instructions.
 - Use a plain dash "-", never an em dash.
 - In long Markdown files, put each sentence on its own line.

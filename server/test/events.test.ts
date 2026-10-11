@@ -4,7 +4,7 @@ import { after, describe, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
 import { maxXpForSchedule, xpFor } from '../src/lib/xp.ts';
-import { type FakeStorage, fakeAnalyzer, fakePool, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
+import { type FakeStorage, fakeAnalyzer, fakePlaces, fakePool, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
 
 test('XP is 100 per hour on site, scaled by tier and capped at 3 hours', () => {
   assert.equal(xpFor('easy', 60), 100);
@@ -17,7 +17,7 @@ test('XP is 100 per hour on site, scaled by tier and capped at 3 hours', () => {
 });
 
 test('GET /events without a token returns 401', async () => {
-  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer() });
+  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer(), places: fakePlaces() });
   try {
     const res = await app.inject({ method: 'GET', url: '/events?latitude=40.7&longitude=-74' });
     assert.equal(res.statusCode, 401);
@@ -101,7 +101,7 @@ describe('events', { skip }, () => {
 
   test('schedule, list, join and leave an event; only the organizer sees emails', async (t) => {
     const storage = fakeStorage();
-    const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer() });
+    const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer(), places: fakePlaces() });
     t.after(() => app.close());
 
     const organizer = await signUp(app);
@@ -177,7 +177,7 @@ describe('events', { skip }, () => {
 
   test('scheduling rejects a start in the past', async (t) => {
     const storage = fakeStorage();
-    const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer() });
+    const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer(), places: fakePlaces() });
     t.after(() => app.close());
 
     const organizer = await signUp(app);
@@ -195,7 +195,7 @@ describe('events', { skip }, () => {
 
   test('concurrent scheduling retries create one party and preserve its organizer membership', async (t) => {
     const storage = fakeStorage();
-    const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer() });
+    const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer(), places: fakePlaces() });
     t.after(() => app.close());
     const organizer = await signUp(app);
     const other = await signUp(app);

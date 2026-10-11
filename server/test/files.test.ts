@@ -3,13 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { newUploadKey } from '../src/lib/files.ts';
-import { fakeAnalyzer, fakePool, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakePlaces, fakePool, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
 
 // The upload checks that run before any file row is written, so they need no database.
 
 async function startApp(t: { after: (fn: () => Promise<unknown>) => void }) {
   const storage = fakeStorage();
-  const app = await buildApp({ env, pool: fakePool(), storage, analyzer: fakeAnalyzer() });
+  const app = await buildApp({ env, pool: fakePool(), storage, analyzer: fakeAnalyzer(), places: fakePlaces() });
   t.after(() => app.close());
   const userId = randomUUID();
   const authorization = `Bearer ${await app.accessTokens.sign(userId)}`;

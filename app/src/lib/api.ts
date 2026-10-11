@@ -178,3 +178,45 @@ export const authApi = {
   logout: (refreshToken: string) => request<void>('/auth/logout', { method: 'POST', body: { refreshToken } }),
   me: (accessToken: string) => request<User>('/me', { accessToken }),
 };
+
+export interface EquipmentItem {
+  id: string;
+  name: string;
+  description: string | null;
+  // Volunteers must bring it, such as a sharps container for sharps. Required items come first.
+  required: boolean;
+}
+
+export interface QuestEquipment {
+  questId: string;
+  items: EquipmentItem[];
+  hazards: Hazard[];
+}
+
+export interface Dropoff {
+  id: string;
+  name: string;
+  address: string;
+  location: LocationPoint;
+  distanceM: number;
+  phone: string | null;
+  hours: string | null;
+  // Where to find the drop-off at the site, such as "Lobby".
+  notes: string | null;
+  // False for sites found by a Google search, which may not accept sharps.
+  verified: boolean;
+  googlePlaceId: string | null;
+}
+
+export interface Escalation {
+  name: string;
+  phone: string;
+  url: string;
+  message: string;
+}
+
+export interface QuestDropoffs {
+  requiresDropoff: boolean;
+  dropoffs: Dropoff[];
+  escalation: Escalation;
+}

@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { after, describe, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
-import { fakeAnalyzer, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakePlaces, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
 
 const skip = process.env.DATABASE_URL
   ? false
@@ -20,7 +20,7 @@ type Storage = ReturnType<typeof fakeStorage>;
 
 async function startApp(t: { after: (fn: () => Promise<unknown>) => void }) {
   const storage = fakeStorage();
-  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer() });
+  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer(), places: fakePlaces() });
   t.after(() => app.close());
   return { app, storage };
 }
@@ -122,7 +122,7 @@ describe('equipment lookup', { skip }, () => {
     }
   });
 
-  test('recommends mapped gear, returns hazard warnings, and blocks drop-off gear advice', async (t) => {
+  test('recommends mapped gear, returns hazard warnings, and limits drop-off hazards to required gear', async (t) => {
     const { app, storage } = await startApp(t);
     const { authorization } = await signUp(app);
     const suffix = randomBytes(5).toString('hex');
@@ -170,11 +170,14 @@ describe('equipment lookup', { skip }, () => {
       headers: { authorization },
     });
     assert.equal(sharps.statusCode, 200);
-    assert.deepEqual(sharps.json().items, []);
-    assert.ok(sharps.json().hazards.some(
-      (hazard: { code: string; requiresDropoff: boolean }) =>
-        hazard.code === 'sharps' && hazard.requiresDropoff,
-    ));
+    // Drop-off hazards get only the gear they require: the sharps container, and no grabber or gloves.
+    assert.deepEqual(
+      sharps.json().items.map((item: { name: string; required: boolean }) => [item.name, item.required]),
+      [['Sharps container', true]],
+    );
+    const sharpsHazard = sharps.json().hazards.find((hazard: { code: string }) => hazard.code === 'sharps');
+    assert.equal(sharpsHazard.requiresDropoff, true);
+    assert.match(sharpsHazard.warning, /call 311/);
 
     const anonymous = await app.inject({
       method: 'GET',
