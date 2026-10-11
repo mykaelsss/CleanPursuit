@@ -77,6 +77,8 @@ A group gets credit together, and a cleanup can take several tries.
 - The location snaps to an H3 cell (resolution 10, about 75 m edge) stored as `area_id`.
 - Gemini looks at the photo as soon as it is uploaded and prefills the form with a description, trash categories, hazards and a trash amount (see [Trash amount](#trash-amount)).
 - The reporter confirms or edits the categories and any hazards, and our rules set the difficulty tier from them (see [Difficulty tier](#difficulty-tier)).
+- Selecting sharps or biohazard shows a Yes/No warning before the hazard is added to the report.
+  The warning tells volunteers not to pick up or touch the item and points them to drop-off and sanitation escalation information.
 - If Gemini is slow or down, the form starts empty and the reporter fills it in by hand.
 - If someone reports a spot that is already reported, the app tells them it exists.
   A new report is still saved and linked to the original as a duplicate.
@@ -123,6 +125,9 @@ A single number looked more exact than it is: two Gemini models said 15 and 25 b
 - Any signed-in user can create the quest, not only the reporter.
 - The person who creates the quest is raising awareness, not organizing.
   They are asked if they want to join a party, but they do not have to.
+- The mobile creation flow can collect the report photo, quest title, confirmed trash categories and an initial scheduled-party plan in one guided form.
+  The API still saves those records in report -> quest -> party order.
+- A recommended party size is planning guidance for the scheduled party, not a limit on sign-ups.
 
 ### Party
 

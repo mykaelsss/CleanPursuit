@@ -24,6 +24,7 @@ export default function ScreenLayout({
 
   return (
     <ScrollView
+      keyboardShouldPersistTaps="handled"
       style={[styles.screen, { backgroundColor: theme.background }]}
       contentContainerStyle={{ paddingBottom: BottomTabInset + 24 }}
     >
