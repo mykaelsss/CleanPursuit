@@ -12,6 +12,12 @@ See the repo root for the product and API docs.
 The app calls the API at `http://localhost:3000` (`http://10.0.2.2:3000` on the Android emulator).
 On a physical device, copy `.env.example` to `.env.local` and set `EXPO_PUBLIC_API_URL` to your computer's LAN address.
 
+## Map
+
+The events map is [Leaflet](https://leafletjs.com) with OpenStreetMap's standard tiles, so it needs no API key.
+Those tiles are run by volunteers, so follow the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/): fine for development and a demo, but switch to a paid tile provider before a real launch.
+It runs in a WebView on phones and an iframe on web, from one page in `src/lib/leaflet-map-html.ts`.
+
 ## Layout
 
 - `src/app/`: screens and layouts (Expo Router).

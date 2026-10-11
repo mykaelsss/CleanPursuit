@@ -8,7 +8,8 @@
     "scheme": "cleanpursuit",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.anonymous.CleanPursuit"
     },
     "android": {
       "adaptiveIcon": {
@@ -34,7 +35,21 @@
           "imageWidth": 76
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow CleanPursuit to choose a photo for your cleanup quest.",
+          "cameraPermission": "Allow CleanPursuit to photograph a cleanup spot for your quest.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "CleanPursuit uses your location to show cleanup quests near you."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

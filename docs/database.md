@@ -1,7 +1,7 @@
 # CleanPursuit database design
 
 The database is a Tiger Cloud service running Postgres 18 with TimescaleDB, PostGIS, H3 and citext.
-It has 20 tables, 2 of which are hypertables, plus 4 continuous aggregates and 1 view.
+It has 21 tables, 2 of which are hypertables, plus 4 continuous aggregates and 1 view.
 The source of truth is the SQL in `server/db/migrations/`; this file explains the shape and the reasons behind it.
 
 For the product side, see [mvp.md](mvp.md).
@@ -13,8 +13,8 @@ For the product side, see [mvp.md](mvp.md).
 | Service | `clean-pursuit` (id `sm60nzjanh`), DEV, us-east-1 |
 | Postgres | 18.6, with built-in `uuidv7()` |
 | Extensions | TimescaleDB 2.30, PostGIS 3.6, h3 + h3_postgis 4.2 (pulls in postgis_raster), citext |
-| Applied | `001_initial_schema.sql`, `002_leaderboards_and_hotspots.sql` |
-| Pending | `003_leaderboard_index.sql` |
+| Applied | `001_initial_schema.sql`, `002_leaderboards_and_hotspots.sql`, `003_photo_analysis.sql`, `004_volume_estimates.sql`, `006_report_place_names.sql`, `007_equipment_seed.sql`, plus `005` from the `biohazard-dropoffs` branch |
+| Pending | `008_leaderboard_index.sql` |
 | Credentials | Connection string stored in Infisical, never in the repo |
 
 ## Conventions
@@ -42,6 +42,7 @@ erDiagram
 
   app_user ||--o{ report : reports
   file ||--o| report : "photo of"
+  file ||--o| photo_analysis : "analyzed by"
   report |o--o{ report : "duplicated by"
   report ||--o{ report_category : tagged
   trash_category ||--o{ report_category : ""
@@ -91,9 +92,15 @@ erDiagram
 
 | Table | Purpose |
 | --- | --- |
-| `report` | One user's sighting: photo, description, location, `difficulty_tier`, optional `estimated_bag_count`. `area_id` is generated from the location. |
+| `report` | One user's sighting: photo, description, location, an optional `place_name` (a readable name for the spot, shown instead of coordinates), `difficulty_tier`, and an optional trash volume range (`estimated_volume_min_gallons`, `estimated_volume_max_gallons`). `area_id` is generated from the location. `estimated_bag_count` is no longer written and will be dropped. |
 | `report_category` | Trash categories on a report, with `source` (`user` or `gemini`). |
 | `report_hazard` | Hazard flags on a report, with `source`. |
+| `photo_analysis` | Gemini's suggestions for one uploaded photo, keyed by `file_id`: whether it shows litter, a description, category and hazard codes, a trash volume range in gallons and `terrain`, plus the model, token counts and latency. |
+
+Gemini runs once per photo, before the report exists, and its result prefills the report form.
+The reporter confirms or edits the tags, and a tag on the report has `source = 'gemini'` when Gemini suggested it for that photo and the reporter kept it.
+`photo_analysis` keeps the codes as plain arrays because a row is a snapshot of what the model said; the API only lets Gemini pick codes that exist at the time.
+The token counts and latency are there to compare models on cost and speed.
 
 Duplicate rules, enforced by triggers:
 
@@ -105,7 +112,7 @@ Duplicate rules, enforced by triggers:
 `area_id` is `h3_lat_lng_to_cell(location, 10)`, a hexagon with an edge of about 75 m.
 It is a stored generated column, so it can never disagree with the location.
 
-`difficulty_tier` is set by API rules from the tags, not by Gemini directly.
+`difficulty_tier` is set by API rules from the report's tags, not by Gemini directly.
 It is provisional until a party ends, when the leader can correct the tags.
 
 ### Quests and parties
@@ -143,10 +150,12 @@ stateDiagram-v2
 
 Rules that live in the API, not the database:
 
-- The first check-in on a walk-up becomes the leader.
-- If the leader leaves without handing off, the longest-present member is promoted.
-- A member with no on-site ping for 30 minutes is marked `left` with `geofence_timeout`.
-- `presence_ping.on_site` is computed with `ST_DWithin` against the quest's report location.
+- Check-in needs a signed-up member, a scheduled party inside its time slot, an open quest and a location within 100 m of the report.
+  The first check-in sets the party `active` and `started_at`.
+- `presence_ping.on_site` is computed with `ST_DWithin` against the quest's report location, within 100 m, and an on-site ping updates `party_member.last_on_site_at`.
+- Ending a party computes each member's time on site from `presence_ping`: the sum of the gaps between consecutive pings that were both on site, each gap at most 10 minutes, between check-in and the scheduled end.
+- Ending a party marks `signed_up` members `no_show` and `checked_in` members `left` with `party_ended`.
+- Not built yet: the first check-in on a walk-up becoming the leader, promoting the longest-present member when the leader leaves, and marking a member `left` with `geofence_timeout` after 30 minutes without an on-site ping.
 
 ### Equipment lookup
 
@@ -154,11 +163,13 @@ Rules that live in the API, not the database:
 | --- | --- |
 | `trash_category` | Fixed category list, seeded: plastic, paper, glass, metal, organic, textiles, electronics, mixed. |
 | `hazard` | Fixed hazard list with `warning_text` and `requires_dropoff`, seeded: sharps, biohazard, broken_glass, chemicals, bulky_items. |
-| `item` | A piece of gear, such as gloves or grabbers. Not seeded yet. |
-| `category_item` | Gear needed for a category. |
-| `hazard_item` | Gear needed for a hazard. |
+| `item` | A piece of gear, such as gloves or grabbers. `007` seeds a litter grabber, work gloves, heavy-duty trash bags, puncture-resistant gloves and closed-toe shoes. |
+| `category_item` | Gear needed for a category. `007` maps the grabber and gloves to every category, and trash bags to every category except electronics. |
+| `hazard_item` | Gear needed for a hazard. `007` maps puncture-resistant gloves and closed-toe shoes to `broken_glass`. |
 
 The gear list for a quest is derived by joining its report's tags to these tables, so Gemini is never called again for gear.
+A report with hazards gets only hazard gear, and gets none if any of its hazards has no gear mapped.
+A report with a hazard that has `requires_dropoff` gets no gear at all, only warnings.
 Hazard warnings never include sharps handling instructions; they point to drop-off and escalation.
 
 ### Drop-off locations
@@ -167,6 +178,10 @@ Hazard warnings never include sharps handling instructions; they point to drop-o
 | --- | --- |
 | `dropoff_location` | Sharps and biohazard drop-off sites. `seed` rows are hand-verified and carry name, address and location. `google_places` rows store only `google_place_id`, because Places terms limit caching; the API refetches details. |
 | `quest_dropoff` | The nearest drop-offs for a quest, fetched once, with `distance_m` and `rank`. `quest.dropoffs_fetched_at` records that the lookup ran, even if it found nothing. |
+
+The API fills `quest_dropoff` the first time a quest with a `requires_dropoff` hazard asks for drop-offs.
+It saves up to 5 rows with `verified_at`, a name, an address and a location within 25 km, nearest first, and only `accepts_sharps` rows for sharps.
+It does not search Google Places yet.
 
 ### Guilds (not in the MVP)
 
@@ -182,8 +197,12 @@ There are no guild features in the MVP.
 
 | Table | Purpose |
 | --- | --- |
-| `activity_event` | Append-only log of everything that happened. Source for XP, leaderboards, hotspots and the dashboard. 7-day chunks, segmented by `user_id`. Primary key `(id, occurred_at)`. |
-| `presence_ping` | GPS pings from checked-in members during a party. 1-day chunks, segmented by `party_id`, dropped after 30 days for privacy. |
+| `activity_event` | Append-only log of everything that happened. Source for XP, leaderboards, hotspots and the dashboard. 7-day chunks, segmented by `user_id`, compressed after 7 days. Primary key `(id, occurred_at)`. |
+| `presence_ping` | GPS pings from checked-in members during a party; time on site for XP is computed from them. 1-day chunks, segmented by `party_id`, compressed after 1 day, dropped after 30 days for privacy. |
+
+The compression policies were not written out in `001`.
+TimescaleDB adds them because the tables are created with `tsdb.hypertable` and a `segmentby`, using the chunk interval as the delay.
+Compressed chunks still accept inserts, updates and deletes.
 
 `activity_event` kinds:
 
@@ -213,11 +232,16 @@ All aggregates are real-time (`materialized_only = false`) and bucket in UTC.
 | `area_hotspot_30d` | Plain view | `report_daily_by_area_reporter` | Always current |
 
 - XP aggregates carry `xp`, `minutes_on_site` and `parties` per user per bucket, indexed on `(bucket, xp DESC)`.
-- All-time XP is `app_user.total_xp`, indexed on `(total_xp DESC, username)` for the all-time leaderboard.
+- All-time XP is `app_user.total_xp`, and the all-time leaderboard ranks it.
+  The pending `008_leaderboard_index.sql` adds an index on `(total_xp DESC, username)`.
+- The daily, weekly and monthly leaderboards read the current UTC bucket from the matching aggregate.
+  The current week and month are never materialized yet, so their rows are rolled up from `xp_daily_by_user` when read.
+  The API filters on a range of fixed timestamps rather than `bucket = time_bucket(..., now())`, so TimescaleDB pushes the filter down to the bucket index.
+- A user's level is derived from `total_xp` in the API and is not stored (see [Levels](mvp.md#levels)).
 - `area_hotspot_30d` returns `distinct_reporters`, `reports` and `last_reported_day` per `area_id` for the last 30 days.
 - The heat map and the hotspot bonus use `distinct_reporters`, so one person re-reporting a spot cannot heat it up alone.
-- The bonus threshold (for example 3 or more reporters) lives in the API.
-- The dashboard groups areas with `h3_cell_to_parent(area_id, 7)` instead of a neighborhoods table.
+- The bonus threshold lives in the API: 3 or more distinct reporters.
+- The planned dashboard will group areas with `h3_cell_to_parent(area_id, 7)` instead of a neighborhoods table.
 
 Refresh policies only look back a few days.
 After backfilling seed data, refresh the full range by hand, daily first:
@@ -231,10 +255,9 @@ CALL refresh_continuous_aggregate('report_daily_by_area_reporter', NULL, NULL);
 
 ## Open items
 
-- Seed gear rows in `item`, `category_item` and `hazard_item`.
 - Seed a few months of backdated demo data for one region, plus hand-verified drop-offs.
-- Add a dashboard aggregate; it needs `area_id` on party events.
-- Decide where Gemini results are stored (likely a 1:1 `report_analysis` table).
+- Add a dashboard aggregate; every party event already carries `area_id`.
+- Drop `report.estimated_bag_count` once no deployed code reads it (kept in 004 so older branches still work on DEV).
 - Clean up R2 objects that were uploaded but never confirmed, and `file` rows that were never attached to anything.
 - Guild leaderboard, later.
 - Verify Tiger's TLS certificate in the API by trusting Timescale's CA.

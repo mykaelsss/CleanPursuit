@@ -1,4 +1,5 @@
 import { buildApp } from './app.ts';
+import { createGeminiAnalyzer } from './lib/analyzer.ts';
 import { type Env, loadEnv } from './env.ts';
 import { createPool } from './lib/db.ts';
 import { createR2Storage } from './lib/storage.ts';
@@ -19,7 +20,8 @@ const storage = createR2Storage({
   secretAccessKey: env.R2_SECRET_ACCESS_KEY,
   bucket: env.R2_BUCKET,
 });
-const app = await buildApp({ env, pool, storage });
+const analyzer = createGeminiAnalyzer({ apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL });
+const app = await buildApp({ env, pool, storage, analyzer });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, async () => {

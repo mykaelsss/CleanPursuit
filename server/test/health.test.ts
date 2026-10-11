@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildApp } from '../src/app.ts';
-import { fakePool, fakeStorage, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakePool, fakeStorage, testEnv as env } from './helpers.ts';
 
 test('GET /health reports ok when the database answers', async (t) => {
   const app = await buildApp({
     env,
     pool: fakePool(async () => ({ rows: [{ '?column?': 1 }] })),
     storage: fakeStorage(),
+    analyzer: fakeAnalyzer(),
   });
   t.after(() => app.close());
 
@@ -24,6 +25,7 @@ test('GET /health reports 503 when the database is unreachable', async (t) => {
       throw new Error('connection refused');
     }),
     storage: fakeStorage(),
+    analyzer: fakeAnalyzer(),
   });
   t.after(() => app.close());
 
@@ -34,10 +36,29 @@ test('GET /health reports 503 when the database is unreachable', async (t) => {
 });
 
 test('unknown routes return 404', async (t) => {
-  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage() });
+  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer() });
   t.after(() => app.close());
 
   const res = await app.inject({ method: 'GET', url: '/nope' });
 
   assert.equal(res.statusCode, 404);
+});
+
+test('browsers may send every method the API uses from another origin', async (t) => {
+  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer() });
+  t.after(() => app.close());
+
+  const res = await app.inject({
+    method: 'OPTIONS',
+    url: '/events/01a12823-1641-70c1-ab2e-967f10759ae0/join',
+    headers: {
+      origin: 'http://localhost:8081',
+      'access-control-request-method': 'DELETE',
+      'access-control-request-headers': 'authorization',
+    },
+  });
+
+  assert.equal(res.statusCode, 204);
+  assert.equal(res.headers['access-control-allow-origin'], '*');
+  assert.ok(String(res.headers['access-control-allow-methods']).split(/,\s*/).includes('DELETE'));
 });

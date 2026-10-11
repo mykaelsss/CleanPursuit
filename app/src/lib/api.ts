@@ -10,7 +10,17 @@ export interface User {
   username: string;
   email: string;
   totalXp: number;
+  level: Level;
   createdAt: string;
+}
+
+// Computed by the API from totalXp; see docs/mvp.md#levels.
+export interface Level {
+  number: number;
+  // XP earned since reaching this level.
+  xpIntoLevel: number;
+  // XP this level takes to finish; null at the max level.
+  xpForNextLevel: number | null;
 }
 
 export interface Tokens {
@@ -33,6 +43,41 @@ export interface Leaderboard {
   entries: LeaderboardEntry[];
   me: { rank: number; totalXp: number };
 }
+
+export type DifficultyTier = 'easy' | 'medium' | 'hard' | 'legendary';
+
+// An event is a scheduled cleanup on a quest. The organizer is the party leader.
+export interface CleanupEvent {
+  id: string;
+  questId: string;
+  title: string;
+  description: string;
+  location: { latitude: number; longitude: number };
+  // A readable name the reporter gave the spot; null on older reports.
+  placeName: string | null;
+  difficultyTier: DifficultyTier;
+  status: 'scheduled' | 'active';
+  scheduledStart: string;
+  scheduledEnd: string;
+  organizer: { id: string; username: string };
+  maxXp: number;
+  photo: { id: string; url: string };
+  attendeeCount: number;
+  joined: boolean;
+  isOrganizer: boolean;
+}
+
+export type NearbyEvent = CleanupEvent & { distanceM: number };
+
+export interface Attendee {
+  user: { id: string; username: string };
+  // Only sent to the event's organizer.
+  email?: string;
+  isOrganizer: boolean;
+  status: 'signed_up' | 'checked_in';
+}
+
+export type EventDetail = CleanupEvent & { attendees: Attendee[] };
 
 // Mirrors the API's `errorSchema`. `code` is stable, so callers branch on it rather than on `message`.
 export class ApiError extends Error {
