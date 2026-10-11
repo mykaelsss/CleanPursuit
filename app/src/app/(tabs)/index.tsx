@@ -1,4 +1,4 @@
-import { Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth';
 export default function HomeScreen() {
   const { user } = useAuth();
   const theme = useTheme();
+  const router = useRouter();
 
   if (!user) return null;
 
@@ -37,9 +38,6 @@ export default function HomeScreen() {
       <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           <View style={styles.greeting}>
-            <ThemedText type="smallBold" themeColor="tint">
-              ADVENTURE HUB
-            </ThemedText>
             <ThemedText type="subtitle">Welcome back, {user.username}</ThemedText>
             <ThemedText themeColor="textSecondary">
               Choose your next move and help your neighborhood.
@@ -55,27 +53,27 @@ export default function HomeScreen() {
             <View style={styles.playerCardTop}>
               <View style={[styles.levelBadge, { backgroundColor: theme.reward }]}>
                 <Text style={[styles.levelBadgeText, { color: theme.onReward }]}>
-                  LEVEL {level.number}
+                  Level {level.number}
                 </Text>
               </View>
               <ThemedText type="smallBold" style={{ color: theme.onGamePanelSoft }}>
-                {user.totalXp.toLocaleString()} TOTAL XP
+                {user.totalXp.toLocaleString()} total XP
               </ThemedText>
             </View>
 
             <View style={styles.progressSection}>
-              <ThemedText type="subtitle" style={{ color: theme.onGamePanel }}>
+              <Text style={[styles.progressHeadline, { color: theme.onGamePanel }]}>
                 {atMaxLevel
                   ? 'You reached the top level'
-                  : `${xpRemaining.toLocaleString()} XP to Level ${level.number + 1}`}
-              </ThemedText>
+                  : `${xpRemaining.toLocaleString()} XP to level ${level.number + 1}`}
+              </Text>
               <View
                 accessibilityRole="progressbar"
                 accessibilityLabel={
                   atMaxLevel ? 'Maximum level reached' : `Progress toward level ${level.number + 1}`
                 }
                 accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
-                style={[styles.progressTrack, { backgroundColor: theme.onGamePanelSoft }]}
+                style={styles.progressTrack}
               >
                 <View
                   style={[
@@ -96,65 +94,55 @@ export default function HomeScreen() {
           </View>
 
           <View style={[styles.section, { borderTopColor: theme.border }]}>
-            <View style={styles.sectionHeading}>
-              <ThemedText type="subtitle">Choose your path</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                Every cleanup begins with one action.
-              </ThemedText>
-            </View>
+            <ThemedText style={styles.sectionTitle}>Choose your path</ThemedText>
 
             <View style={styles.actionGrid}>
               <QuestAction
-                href="/events"
-                eyebrow="EXPLORE"
+                onPress={() => router.push('/events')}
                 icon="compass"
                 title="Find a quest"
                 description="Join a cleanup happening near you."
+                actionLabel="Browse quests"
                 backgroundColor={theme.questAction}
                 foregroundColor={theme.onQuestAction}
                 iconBackgroundColor={theme.questActionGlow}
                 iconColor={theme.gamePanel}
-                borderColor={theme.questActionGlow}
+                borderColor={theme.questAction}
+                buttonColor={theme.reward}
+                onButtonColor={theme.onReward}
               />
               <QuestAction
-                href="/create"
-                eyebrow="LEAD"
+                onPress={() => router.push('/create')}
                 icon="flag"
                 title="Create a quest"
                 description="Mark a spot and rally your neighbors."
+                actionLabel="Start a quest"
                 backgroundColor={theme.backgroundElement}
                 foregroundColor={theme.text}
+                secondaryColor={theme.textSecondary}
                 iconBackgroundColor={theme.backgroundSelected}
                 iconColor={theme.text}
                 borderColor={theme.border}
+                buttonColor={theme.tint}
+                onButtonColor={theme.onTint}
               />
             </View>
           </View>
 
-          <ThemedView
-            type="backgroundElement"
-            style={[styles.rankingCard, { borderColor: theme.border }]}
-          >
-            <View style={styles.rankingCopy}>
-              <ThemedText type="smallBold" themeColor="tint">
-                CLIMB THE RANKS
-              </ThemedText>
-              <ThemedText type="subtitle">Leaderboard</ThemedText>
-              <ThemedText themeColor="textSecondary">
-                See how your all-time XP compares.
-              </ThemedText>
-            </View>
-            <Link href="/leaderboard" asChild>
-              <Pressable
-                accessibilityRole="button"
-                style={squish([styles.rankingButton, { borderColor: theme.border }])}
-              >
-                <ThemedText type="smallBold" themeColor="tint" selectable={false}>
-                  View rankings
-                </ThemedText>
-              </Pressable>
-            </Link>
-          </ThemedView>
+          <View style={styles.linkRows}>
+            <LinkRow
+              onPress={() => router.push('/leaderboard')}
+              title="Leaderboard"
+              description="See how your all-time XP compares."
+              actionLabel="View rankings"
+            />
+            <LinkRow
+              onPress={() => router.push('/resources')}
+              title="Safety resources"
+              description="Who to call and where to take hazardous items in NYC."
+              actionLabel="View resources"
+            />
+          </View>
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
@@ -162,37 +150,51 @@ export default function HomeScreen() {
 }
 
 type QuestActionProps = {
-  href: '/events' | '/create';
-  eyebrow: string;
+  onPress: () => void;
   icon: 'compass' | 'flag';
   title: string;
   description: string;
+  actionLabel: string;
   backgroundColor: string;
   foregroundColor: string;
+  secondaryColor?: string;
   iconBackgroundColor: string;
   iconColor: string;
   borderColor: string;
+  buttonColor: string;
+  onButtonColor: string;
 };
 
 function QuestAction({
-  href,
-  eyebrow,
+  onPress,
   icon,
   title,
   description,
+  actionLabel,
   backgroundColor,
   foregroundColor,
+  secondaryColor = foregroundColor,
   iconBackgroundColor,
   iconColor,
   borderColor,
+  buttonColor,
+  onButtonColor,
 }: QuestActionProps) {
   return (
-    <Link href={href} asChild>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${title}. ${description}`}
-        style={squish([styles.actionCard, { backgroundColor, borderColor }])}
-      >
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={actionLabel}
+      accessibilityHint={description}
+      onPress={onPress}
+      style={squish([styles.actionCard, { backgroundColor, borderColor }])}
+    >
+      <View style={styles.actionTop}>
+        <View style={styles.actionCopy}>
+          <Text style={[styles.actionTitle, { color: foregroundColor }]}>{title}</Text>
+          <ThemedText style={[styles.actionDescription, { color: secondaryColor }]}>
+            {description}
+          </ThemedText>
+        </View>
         <View
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
@@ -200,26 +202,47 @@ function QuestAction({
         >
           <QuestActionIcon name={icon} color={iconColor} />
         </View>
+      </View>
 
-        <View style={styles.actionTitleGroup}>
-          <ThemedText type="smallBold" style={{ color: foregroundColor }}>
-            {eyebrow}
-          </ThemedText>
-          <ThemedText type="subtitle" style={[styles.actionTitle, { color: foregroundColor }]}>
-            {title}
-          </ThemedText>
-        </View>
+      <View style={[styles.actionButton, { backgroundColor: buttonColor }]}>
+        <Text style={[styles.actionButtonText, { color: onButtonColor }]}>{actionLabel}</Text>
+      </View>
+    </Pressable>
+  );
+}
 
-        <ThemedText style={[styles.actionDescription, { color: foregroundColor }]}>
+type LinkRowProps = {
+  onPress: () => void;
+  title: string;
+  description: string;
+  actionLabel: string;
+};
+
+function LinkRow({ onPress, title, description, actionLabel }: LinkRowProps) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={actionLabel}
+      accessibilityHint={description}
+      onPress={onPress}
+      style={squish([
+        styles.linkRow,
+        { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+      ])}
+    >
+      <View style={styles.linkRowCopy}>
+        <ThemedText style={styles.sectionTitle}>{title}</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">
           {description}
         </ThemedText>
-        <View style={[styles.goBadge, { borderColor: foregroundColor }]}>
-          <ThemedText type="smallBold" style={{ color: foregroundColor }} selectable={false}>
-            GO
-          </ThemedText>
-        </View>
-      </Pressable>
-    </Link>
+      </View>
+      <View style={[styles.linkRowButton, { borderColor: theme.tint }]}>
+        <ThemedText type="smallBold" themeColor="tint" selectable={false}>
+          {actionLabel}
+        </ThemedText>
+      </View>
+    </Pressable>
   );
 }
 
@@ -307,6 +330,8 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   progressTrack: {
+    // A faint track so an empty bar never reads as a full one.
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
     borderRadius: 6,
     height: 12,
     overflow: 'hidden',
@@ -319,67 +344,85 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
+  progressHeadline: {
+    ...displayStyles.base,
+    fontSize: 26,
+    lineHeight: 32,
+  },
   section: {
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: Spacing.three,
     paddingTop: Spacing.four,
   },
-  sectionHeading: {
-    gap: Spacing.one,
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: 700,
+    lineHeight: 28,
   },
   actionGrid: {
-    gap: Spacing.four,
+    gap: Spacing.three,
   },
   actionCard: {
-    alignItems: 'flex-start',
     borderRadius: Spacing.three,
     borderWidth: 1.5,
     gap: Spacing.three,
-    minHeight: 176,
-    padding: Spacing.four,
+    padding: Spacing.three + Spacing.one,
+  },
+  actionTop: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: Spacing.three,
+  },
+  actionCopy: {
+    flex: 1,
+    gap: Spacing.one,
   },
   actionIcon: {
     alignItems: 'center',
-    borderRadius: 28,
-    height: 56,
+    borderRadius: 26,
+    height: 52,
     justifyContent: 'center',
-    position: 'absolute',
-    right: Spacing.four,
-    top: Spacing.four,
-    width: 56,
-  },
-  actionTitleGroup: {
-    gap: Spacing.one,
-    paddingRight: 72,
-    width: '100%',
+    width: 52,
   },
   actionTitle: {
-    fontSize: 28,
-    lineHeight: 34,
+    ...displayStyles.base,
+    fontSize: 26,
+    lineHeight: 32,
   },
   actionDescription: {
     lineHeight: 22,
   },
-  goBadge: {
+  actionButton: {
     alignItems: 'center',
     alignSelf: 'flex-start',
-    borderRadius: Spacing.two,
-    borderWidth: 1.5,
+    borderRadius: Spacing.three,
     justifyContent: 'center',
-    minHeight: 40,
-    minWidth: 48,
-    paddingHorizontal: Spacing.two,
+    minHeight: MIN_TOUCH,
+    paddingHorizontal: Spacing.four,
   },
-  rankingCard: {
+  actionButtonText: {
+    ...displayStyles.base,
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  linkRows: {
+    gap: Spacing.three,
+  },
+  linkRow: {
+    alignItems: 'center',
     borderRadius: Spacing.three,
     borderWidth: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: Spacing.three,
-    padding: Spacing.four,
+    padding: Spacing.three + Spacing.one,
   },
-  rankingCopy: {
-    gap: Spacing.one,
+  linkRowCopy: {
+    flexBasis: 180,
+    flexGrow: 1,
+    gap: Spacing.half,
   },
-  rankingButton: {
+  linkRowButton: {
     alignItems: 'center',
     borderRadius: Spacing.three,
     borderWidth: 1.5,
