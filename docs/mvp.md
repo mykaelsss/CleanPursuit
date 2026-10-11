@@ -139,6 +139,8 @@ There are two kinds, derived from whether a schedule is set:
 | Event (scheduled party) | Someone picks a time slot and asks for help | The person who scheduled it |
 | Bounty (walk-up party) | Anyone at the site checks in; others join the live party | The first person to check in |
 
+Walk-up parties are not built yet: check-in and ending both need a scheduled party.
+
 Event rules:
 
 - Anyone can schedule an event on an open quest, and becomes its leader (the organizer) and first attendee.
@@ -146,6 +148,9 @@ Event rules:
 - Anyone can join an event until it ends, and can withdraw until they check in.
 - The organizer cannot withdraw from their own event.
 - Only the organizer can see attendees' email addresses.
+- The API has two routes that schedule parties.
+  `POST /quests/{id}/events` applies the rules above.
+  `POST /quests/{questId}/parties` only needs a future start and an end after it, with no 12-hour limit, and its join route closes at the start time instead of the end.
 
 Leader rules:
 
@@ -155,18 +160,27 @@ Leader rules:
 - If the leader leaves without handing off, the member who has been there longest is promoted.
 - If nobody is left, the party is abandoned.
 
+Only the first two rules are built.
+Handing off, promotion and abandoning a party are not.
+
 ### Presence
 
-- Members check in by GPS when they arrive.
-- The app sends location pings during the party.
-- A member with no on-site ping for 30 minutes is removed automatically.
-- Time on site runs from check-in to the member's last on-site ping.
+- Members who signed up check in by GPS when they arrive, between the scheduled start and end.
+- Check-in and on-site pings use a 100 m geofence around the report location.
+  The number is a temporary MVP value, to revisit after end-to-end demo testing.
+- The first check-in makes the party active.
+- The app sends location pings during the party, and each on-site ping moves the member's last on-site time forward.
+- Time on site runs from check-in to the member's last on-site ping, stopping at the scheduled end.
+- Removing a member after 30 minutes without an on-site ping is not built yet.
 - Pings are deleted after 30 days.
 
 ### Ending a party
 
 The leader submits an after photo, a bag count and an outcome.
-The leader can also correct the report's tags before XP is awarded.
+The after photo must be the leader's own confirmed upload and not attached to a report or another party.
+Only an active scheduled party with an open quest can be ended.
+Members who never checked in are marked as no-shows, and everyone still checked in leaves with the party.
+Letting the leader correct the report's tags before XP is awarded is not built yet.
 
 | Outcome | What happens to the quest | XP |
 | --- | --- | --- |
@@ -174,6 +188,8 @@ The leader can also correct the report's tags before XP is awarded.
 | Partial | Stays open for a follow-up scheduled party or as a bounty | Yes |
 | Abandoned | Stays open; everyone left without an after photo | No |
 | Cancelled | A scheduled party was called off before it started | No |
+
+The API accepts `completed` and `partial`; abandoned and cancelled have no route yet.
 
 ```mermaid
 stateDiagram-v2
@@ -188,23 +204,27 @@ stateDiagram-v2
 
 ### XP
 
-- XP is awarded once per party, when it ends with an after photo.
+- XP is awarded once per party, when the leader ends it with an after photo.
 - Only members who checked in earn XP, including people who left early.
-- Each member's XP is based on their time on site.
-- XP scales with the report's difficulty tier.
-- XP is capped per quest so a crowd cannot farm it.
-- Cleaning a hotspot adds bonus XP.
-- XP feeds daily, weekly and monthly leaderboards plus each user's all-time total.
-
+- Each member's XP is based on how much of the time slot they were on site.
+- XP does not scale with the difficulty tier yet.
+- A member earns at most 100 XP per party, hotspot bonus included.
+- Cleaning a hotspot adds bonus XP when the outcome is completed.
+- XP feeds daily, weekly and monthly aggregates plus each user's all-time total; the API serves the all-time leaderboard only.
 
 | Rule | Value |
 | --- | --- |
-| Base rate | 100 XP per hour on site |
-| Tier multiplier | Easy 1x, medium 1.5x, hard 2x, legendary 3x |
-| Cap | 3 hours on site per party |
+| Time slot used | The scheduled length in whole minutes, at least 1 and at most 100 |
+| Base XP | 100 x minutes on site / time slot used, rounded down, at most 100 |
+| Hotspot threshold | 3 or more distinct reporters in the area in the last 30 days |
+| Hotspot bonus | 20% of base XP, rounded down, limited so base plus bonus is at most 100 |
 
-An event card shows "up to" the XP for being on site for the whole time slot.
-The hotspot bonus and threshold are still open.
+For a time slot of 100 minutes or more, that is 1 XP per minute on site up to 100.
+For a 1-hour slot, a member there the whole hour earns 100 XP and one there 30 minutes earns 50.
+A member who earns the full 100 base XP gets no hotspot bonus, because the bonus cannot push the total past 100.
+
+The event card's "up to" figure comes from `server/src/lib/xp.ts` (100 XP per hour on site, times easy 1x, medium 1.5x, hard 2x or legendary 3x, capped at 3 hours).
+That is not what ending a party awards, so the card can show more XP than members receive.
 
 ### Levels
 
@@ -232,8 +252,9 @@ The numbers live in `server/src/lib/levels.ts`.
 | 14 | 48,500 | 10,700 |
 | 15 | 59,200 | Max level |
 
-The curve is tuned for a typical cleanup earning a few hundred XP, so a regular volunteer reaches the middle levels in a few months and level 15 takes well over a hundred cleanups.
-Revisit it when the XP base rate is set.
+The curve was tuned for a typical cleanup earning a few hundred XP, so a regular volunteer would reach the middle levels in a few months and level 15 would take well over a hundred cleanups.
+Parties now award at most 100 XP, so level 15 takes at least 592 cleanups.
+Revisit the curve or the XP rules so they agree.
 XP keeps counting past level 15 for the leaderboards.
 
 ## Tiger Data features
@@ -281,7 +302,7 @@ Why Flash-Lite:
 | File storage | Cloudflare R2 |
 | Secrets | Infisical |
 | AI | Gemini (Flash-class) |
-| Drop-off search | Hand-verified seed rows first, Google Places as fallback |
+| Drop-off search | Verified sites in `dropoff_location` within 25 km; no Google Places fallback yet |
 
 ## 48-hour build order
 
@@ -289,11 +310,11 @@ The core loop ships first so there is always a working demo.
 
 1. Set up the project, the Tiger Data schema and the activity-log hypertable with area snapping. (Done)
 2. Report and quest creation, with photo upload. (API done)
-3. Map and list views, plus party sign-up and check-in.
-4. Ending a party with bag count and after photo, then XP and the leaderboard.
-5. Gemini photo analysis, the tier rules and the equipment lookup. (Analysis and tier rules done in the API)
-6. Hotspot aggregate and bonus XP.
-7. Biohazard drop-off map with directions links, and the resources page.
+3. Map and list views, plus party sign-up and check-in. (Scheduled parties done in the API)
+4. Ending a party with bag count and after photo, then XP and the leaderboard. (Scheduled parties and the all-time leaderboard done in the API)
+5. Gemini photo analysis, the tier rules and the equipment lookup. (Done in the API)
+6. Hotspot aggregate and bonus XP. (Done in the API)
+7. Biohazard drop-off map with directions links, and the resources page. (Drop-off lookup done in the API)
 8. Seed a few months of backdated data for one demo region, plus a few hand-verified sharps drop-off locations.
 9. Polish, rehearse the demo, then stretch goals if time remains.
 
@@ -301,9 +322,9 @@ The core loop ships first so there is always a working demo.
 
 | Risk | Mitigation |
 | --- | --- |
-| XP can be farmed with staged or exaggerated photos | Award XP only after the after photo, only to GPS-checked-in members, cap XP per quest, treat the reporter's tier as provisional |
+| XP can be farmed with staged or exaggerated photos | Award XP only after the after photo, only to GPS-checked-in members, cap XP at 100 per member per party, treat the reporter's tier as provisional |
 | Gemini misclassifies a photo | Gemini extracts features only; our rules set the tier; the party leader corrects tags before XP |
-| Drop-off search returns places that do not accept sharps | Hand-verified seed table first, Places as fallback, and a verify-before-you-go note on each result |
+| Drop-off search returns places that do not accept sharps | Only verified sites that accept sharps for sharps quests, and a verify-before-you-go note on each result |
 | Google Places terms limit caching | Store only place IDs and refetch details |
 | Continuous aggregates lag during the demo | Real-time aggregates with a 5-minute refresh, plus a manual refresh after seeding |
 | Gemini quota or rate limits | Check limits for the team key before the event; one call per report |
@@ -312,16 +333,20 @@ The core loop ships first so there is always a working demo.
 
 Done:
 
-- Schema migrations `001` to `003` are applied to the DEV Tiger service and tested.
-- API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, and quests.
+- Schema migrations `001` to `007` are applied to the DEV Tiger service and tested (`005` is on the `biohazard-dropoffs` branch).
+- API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, quests, events and scheduled parties with GPS check-in and presence, ending a party with XP and the hotspot bonus, the all-time leaderboard, hotspots, equipment and drop-offs.
 
 Open:
 
-- [x] XP numbers: 100 XP per hour, tier multipliers and a 3-hour cap (see [XP](#xp)).
-- [ ] Hotspot bonus XP and threshold.
-- [ ] Geofence radius for check-in and on-site pings.
+- [x] XP numbers: up to 100 XP per party from the share of the time slot on site (see [XP](#xp)).
+- [ ] Make the event card's "up to" XP and the level curve agree with the XP awarded.
+- [x] Hotspot bonus XP and threshold: 20% bonus at 3 distinct reporters.
+- [x] Geofence radius for check-in and on-site pings: 100 m for now.
+- [ ] One set of routes for scheduling and joining parties (`/events` and `/parties` overlap).
+- [ ] Walk-up parties, leader handoff, the 30-minute presence timeout, and abandoned and cancelled outcomes.
+- [ ] Daily, weekly and monthly leaderboards in the API.
 - [ ] Demo region, for seed data and drop-off locations.
-- [ ] Gear seed data for the equipment lookup.
+- [x] Gear seed data for the equipment lookup.
 - [ ] Backdated demo data.
 - [ ] Dashboard aggregate.
 - [ ] Task split across the team: frontend, Tiger Data and backend, Gemini integration, demo data.
