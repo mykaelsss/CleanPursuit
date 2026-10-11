@@ -19,7 +19,7 @@ Cleanups are volunteer events, which removes the fraud and verification problem 
 | Best Environmental Hack | Gamified neighborhood litter cleanup | Core loop |
 | Best Use of Gemini API | Photo analysis for categories, hazards and difficulty tier | Should have |
 | Best Use of Tiger Data | Hypertables, continuous aggregates for hotspots and leaderboards, PostGIS, H3 | Should have |
-| Best Health Hack | Hazard warnings, equipment guidance and drop-off routing for sharps | Should have |
+| Best Health Hack | Hazard warnings, a 311 disclaimer, required sharps gear and drop-off routing from NYC's official site list | Should have |
 | Best Overall Hack | Full loop working with a populated demo | All of the above |
 | Best Domain Name (GoDaddy Registry) | Register a project domain | Stretch |
 | Best Use of ElevenLabs | Spoken safety briefing | Stretch |
@@ -51,10 +51,13 @@ The demo works end to end with these six features.
 - **Hotspot multiplier.**
   Areas reported by several different people get bonus XP, computed from Tiger Data aggregates.
 - **Biohazard drop-off map.**
-  When a report is flagged as sharps or biohazard, the app fetches nearby drop-off locations once and stores them with the quest.
+  When a quest has sharps or biohazard, the first request for its drop-offs finds the nearest sites and saves them with the quest, so the lookup runs once.
+  Sites come from NYC's official list of syringe and sharps drop-off sites first, and from a Google Places search only when none is within 5 km.
+  Places results are marked unverified, so volunteers call ahead.
   They show on their own map, and tapping one opens directions in the user's maps app.
-  If nothing is nearby, the app shows the sanitation escalation path instead.
-  Volunteers are pointed to drop-off and escalation, never given sharps handling instructions.
+  Every sharps and biohazard quest shows a disclaimer: the recommended approach is to call 311, and anyone who handles it themselves must be extremely careful.
+  A sharps container is required gear for sharps, because drop-off sites only accept sharps in a rigid, puncture-proof container.
+  The app never gives step-by-step handling instructions.
 - **Resources page.**
   Hardcoded in the app: sanitation escalation, disposal guidance, reporting numbers and where to get supplies.
 
@@ -332,7 +335,7 @@ Why Flash-Lite:
 | File storage | Cloudflare R2 |
 | Secrets | Infisical |
 | AI | Gemini (Flash-class) |
-| Drop-off search | Verified sites in `dropoff_location` within 25 km; no Google Places fallback yet |
+| Drop-off search | NYC Open Data's syringe drop-off sites first, Google Places (New) as fallback |
 
 ## 48-hour build order
 
@@ -345,7 +348,7 @@ The core loop ships first so there is always a working demo.
 5. Gemini photo analysis, the tier rules and the equipment lookup. (Done in the API)
 6. Hotspot aggregate and bonus XP. (Done in the API)
 7. Biohazard drop-off map with directions links, and the resources page. (Drop-off lookup done in the API)
-8. Seed a few months of backdated data for one demo region, plus a few hand-verified sharps drop-off locations.
+8. Seed a few months of backdated data for New York City. (Sharps drop-off sites imported from NYC Open Data)
 9. Polish, rehearse the demo, then stretch goals if time remains.
 
 ## Risks and mitigations
@@ -354,7 +357,7 @@ The core loop ships first so there is always a working demo.
 | --- | --- |
 | XP can be farmed with staged or exaggerated photos | Award XP only after the after photo, only to GPS-checked-in members, cap XP at 100 per member per party, treat the reporter's tier as provisional |
 | Gemini misclassifies a photo | Gemini extracts features only; our rules set the tier; the party leader corrects tags before XP |
-| Drop-off search returns places that do not accept sharps | Only verified sites that accept sharps for sharps quests, and a verify-before-you-go note on each result |
+| Drop-off search returns places that do not accept sharps | NYC's official site list first, Places only as fallback, and a verify-before-you-go note on each Places result |
 | Google Places terms limit caching | Store only place IDs and refetch details |
 | Continuous aggregates lag during the demo | Real-time aggregates with a 5-minute refresh, plus a manual refresh after seeding |
 | Gemini quota or rate limits | Check limits for the team key before the event; one call per report |
@@ -363,8 +366,10 @@ The core loop ships first so there is always a working demo.
 
 Done:
 
-- Schema migrations `001` to `007` are applied to the DEV Tiger service and tested (`005` is on the `biohazard-dropoffs` branch).
+- Schema migrations `001` to `008` are applied to the DEV Tiger service and tested.
 - API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, quests, events and scheduled parties with GPS check-in and presence, ending a party with XP from presence pings and the hotspot bonus, daily, weekly, monthly and all-time leaderboards, hotspots, equipment and drop-offs.
+- 196 sharps drop-off sites imported from NYC Open Data.
+- Region: New York City (the five boroughs) for seed data, drop-off locations, escalation contacts and the resources page.
 
 Open:
 
@@ -375,7 +380,7 @@ Open:
 - [ ] One set of routes for scheduling and joining parties (`/events` and `/parties` overlap).
 - [ ] Walk-up parties, leader handoff, the 30-minute presence timeout, and abandoned and cancelled outcomes.
 - [x] Daily, weekly and monthly leaderboards in the API.
-- [ ] Demo region, for seed data and drop-off locations.
+- [x] Demo region, for seed data and drop-off locations: New York City.
 - [x] Gear seed data for the equipment lookup.
 - [ ] Backdated demo data.
 - [ ] Dashboard aggregate.

@@ -2,6 +2,7 @@ import { buildApp } from './app.ts';
 import { createGeminiAnalyzer } from './lib/analyzer.ts';
 import { type Env, loadEnv } from './env.ts';
 import { createPool } from './lib/db.ts';
+import { createGooglePlaceFinder } from './lib/places.ts';
 import { createR2Storage } from './lib/storage.ts';
 
 let env: Env;
@@ -21,7 +22,8 @@ const storage = createR2Storage({
   bucket: env.R2_BUCKET,
 });
 const analyzer = createGeminiAnalyzer({ apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL });
-const app = await buildApp({ env, pool, storage, analyzer });
+const places = createGooglePlaceFinder({ apiKey: env.GOOGLE_MAPS_API_KEY });
+const app = await buildApp({ env, pool, storage, analyzer, places });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, async () => {

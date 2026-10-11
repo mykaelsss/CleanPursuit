@@ -12,7 +12,8 @@
     "typecheck": "tsc",
     "test": "node --test 'test/**/*.test.ts'",
     "try:analysis": "node scripts/try-analysis.ts",
-    "seed:demo": "node scripts/seed-demo.ts"
+    "seed:demo": "node scripts/seed-demo.ts",
+    "import:dropoffs": "node scripts/import-nyc-dropoffs.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1149.0",

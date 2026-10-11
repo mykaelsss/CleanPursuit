@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildApp } from '../src/app.ts';
-import { fakeAnalyzer, fakePool, fakeStorage, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakePlaces, fakePool, fakeStorage, testEnv as env } from './helpers.ts';
 
 test('GET /health reports ok when the database answers', async (t) => {
   const app = await buildApp({
@@ -9,6 +9,7 @@ test('GET /health reports ok when the database answers', async (t) => {
     pool: fakePool(async () => ({ rows: [{ '?column?': 1 }] })),
     storage: fakeStorage(),
     analyzer: fakeAnalyzer(),
+    places: fakePlaces(),
   });
   t.after(() => app.close());
 
@@ -26,6 +27,7 @@ test('GET /health reports 503 when the database is unreachable', async (t) => {
     }),
     storage: fakeStorage(),
     analyzer: fakeAnalyzer(),
+    places: fakePlaces(),
   });
   t.after(() => app.close());
 
@@ -36,7 +38,13 @@ test('GET /health reports 503 when the database is unreachable', async (t) => {
 });
 
 test('unknown routes return 404', async (t) => {
-  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer() });
+  const app = await buildApp({
+    env,
+    pool: fakePool(),
+    storage: fakeStorage(),
+    analyzer: fakeAnalyzer(),
+    places: fakePlaces(),
+  });
   t.after(() => app.close());
 
   const res = await app.inject({ method: 'GET', url: '/nope' });
@@ -45,7 +53,7 @@ test('unknown routes return 404', async (t) => {
 });
 
 test('browsers may send every method the API uses from another origin', async (t) => {
-  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer() });
+  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer(), places: fakePlaces() });
   t.after(() => app.close());
 
   const res = await app.inject({

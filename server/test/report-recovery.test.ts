@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createAccessTokens } from '../src/lib/tokens.ts';
-import { fakeAnalyzer, fakePool, fakeStorage, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakePlaces, fakePool, fakeStorage, testEnv as env } from './helpers.ts';
 
 const userId = '01990000-0000-7000-8000-000000000000';
 const fileId = '01990000-0000-7000-8000-000000000001';
 
 async function recover(rows: { report_id: string | null }[], authorization?: string) {
-  const app = await buildApp({ env, pool: fakePool(async () => ({ rows })), storage: fakeStorage(), analyzer: fakeAnalyzer() });
+  const app = await buildApp({ env, pool: fakePool(async () => ({ rows })), storage: fakeStorage(), analyzer: fakeAnalyzer(), places: fakePlaces() });
   try {
     return await app.inject({ method: 'GET', url: `/files/${fileId}/report`, headers: authorization ? { authorization } : {} });
   } finally { await app.close(); }
