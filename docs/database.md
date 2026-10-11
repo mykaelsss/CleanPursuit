@@ -91,7 +91,7 @@ erDiagram
 
 | Table | Purpose |
 | --- | --- |
-| `report` | One user's sighting: photo, description, location, `difficulty_tier`, and an optional trash volume range (`estimated_volume_min_gallons`, `estimated_volume_max_gallons`). `area_id` is generated from the location. `estimated_bag_count` is no longer written and will be dropped. |
+| `report` | One user's sighting: photo, description, location, an optional `place_name` (a readable name for the spot, shown instead of coordinates), `difficulty_tier`, and an optional trash volume range (`estimated_volume_min_gallons`, `estimated_volume_max_gallons`). `area_id` is generated from the location. `estimated_bag_count` is no longer written and will be dropped. |
 | `report_category` | Trash categories on a report, with `source` (`user` or `gemini`). |
 | `report_hazard` | Hazard flags on a report, with `source`. |
 | `photo_analysis` | Gemini's suggestions for one uploaded photo, keyed by `file_id`: whether it shows litter, a description, category and hazard codes, a trash volume range in gallons and `terrain`, plus the model, token counts and latency. |

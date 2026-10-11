@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -7,7 +7,7 @@ import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth';
 
 export default function HomeScreen() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
 
   return (
     <ThemedView style={styles.container}>
@@ -34,15 +34,6 @@ export default function HomeScreen() {
             </ThemedText>
           </ThemedView>
         )}
-
-        <Pressable
-          onPress={signOut}
-          accessibilityRole="button"
-          style={({ pressed }) => pressed && styles.pressed}>
-          <ThemedText type="small" themeColor="textSecondary">
-            Log out
-          </ThemedText>
-        </Pressable>
       </SafeAreaView>
     </ThemedView>
   );
@@ -66,8 +57,5 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
     borderRadius: Spacing.three,
     gap: Spacing.one,
-  },
-  pressed: {
-    opacity: 0.7,
   },
 });

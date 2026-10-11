@@ -9,7 +9,7 @@ const subscribe = () => () => {};
  * The static HTML is rendered in light mode, so hydration uses 'light' and React then
  * re-renders with the real color scheme.
  */
-export function useColorScheme() {
+export function useColorScheme(): 'light' | 'dark' {
   const hydrated = useSyncExternalStore(
     subscribe,
     () => true,
@@ -17,5 +17,5 @@ export function useColorScheme() {
   );
   const colorScheme = useRNColorScheme();
 
-  return hydrated ? colorScheme : 'light';
+  return hydrated && colorScheme === 'dark' ? 'dark' : 'light';
 }

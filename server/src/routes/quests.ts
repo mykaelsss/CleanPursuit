@@ -5,7 +5,7 @@ import { isUniqueViolation } from '../lib/db.ts';
 import { type DifficultyTier, difficultyTierSchema } from '../lib/difficulty.ts';
 import { errorSchema, HttpError } from '../lib/errors.ts';
 import { photoSchema } from '../lib/files.ts';
-import { geographyPoint, locationSchema, selectLocation } from '../lib/geo.ts';
+import { geographyPoint, locationSchema, placeNameSchema, selectLocation } from '../lib/geo.ts';
 import { perUserRateLimit } from '../lib/rate-limit.ts';
 import { findReport, reportSchema } from '../lib/reports.ts';
 import type { Storage } from '../lib/storage.ts';
@@ -36,6 +36,7 @@ const questSummarySchema = z.object({
   status: questStatusSchema,
   difficultyTier: difficultyTierSchema,
   location: locationSchema,
+  placeName: placeNameSchema.nullable(),
   distanceM: z.number().int().describe('Meters from the requested location'),
   hazards: z.array(z.string()).describe('Hazard codes, for map icons and warnings'),
   photo: photoSchema,
@@ -155,13 +156,14 @@ const questRoutes: FastifyPluginAsyncZod = async (app) => {
         difficulty_tier: DifficultyTier;
         latitude: number;
         longitude: number;
+        place_name: string | null;
         distance_m: number;
         hazards: string[];
         photo_file_id: string;
         photo_key: string;
         created_at: Date;
       }>(
-        `SELECT q.id, q.title, q.status, r.difficulty_tier, ${selectLocation('r.location')},
+        `SELECT q.id, q.title, q.status, r.difficulty_tier, ${selectLocation('r.location')}, r.place_name,
                 round(ST_Distance(r.location, ${geographyPoint(2, 1)}))::integer AS distance_m,
                 ARRAY(SELECT hazard_code FROM report_hazard WHERE report_id = r.id ORDER BY hazard_code) AS hazards,
                 r.photo_file_id, f.key AS photo_key, q.created_at
@@ -182,6 +184,7 @@ const questRoutes: FastifyPluginAsyncZod = async (app) => {
           status: row.status,
           difficultyTier: row.difficulty_tier,
           location: { latitude: row.latitude, longitude: row.longitude },
+          placeName: row.place_name,
           distanceM: row.distance_m,
           hazards: row.hazards,
           photo: { id: row.photo_file_id, url: await app.storage.presignDownload(row.photo_key) },

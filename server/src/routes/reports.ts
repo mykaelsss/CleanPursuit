@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { isForeignKeyViolation, isUniqueViolation, withTransaction } from '../lib/db.ts';
 import { difficultyTier } from '../lib/difficulty.ts';
 import { errorSchema, HttpError } from '../lib/errors.ts';
-import { geographyPoint, locationSchema } from '../lib/geo.ts';
+import { geographyPoint, locationSchema, placeNameSchema } from '../lib/geo.ts';
 import { perUserRateLimit } from '../lib/rate-limit.ts';
 import { categorySchema, findReport, hazardSchema, reportSchema } from '../lib/reports.ts';
 import { isSensibleRange, volumeRangeSchema } from '../lib/volume.ts';
@@ -59,6 +59,12 @@ const reportRoutes: FastifyPluginAsyncZod = async (app) => {
           photoFileId: z.uuid().describe('From POST /files'),
           description: z.string().trim().min(1).max(2000),
           location: locationSchema,
+          placeName: placeNameSchema
+            .trim()
+            .min(1)
+            .max(120)
+            .optional()
+            .describe("Suggest one from the phone's geocoder and let the reporter edit it"),
           categories: z.array(tagCode).min(1).max(20).describe('Codes from GET /tags'),
           hazards: z.array(tagCode).max(20).default([]).describe('Codes from GET /tags'),
           estimatedVolume: volumeRangeSchema
@@ -69,7 +75,7 @@ const reportRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const { photoFileId, description, location, estimatedVolume } = request.body;
+      const { photoFileId, description, location, placeName, estimatedVolume } = request.body;
       if (estimatedVolume && !isSensibleRange(estimatedVolume)) {
         throw new HttpError(
           400,
@@ -113,8 +119,9 @@ const reportRoutes: FastifyPluginAsyncZod = async (app) => {
 
           const { rows } = await client.query<{ id: string }>(
             `INSERT INTO report (reporter_user_id, photo_file_id, description, location, duplicate_of_report_id,
-                                 difficulty_tier, estimated_volume_min_gallons, estimated_volume_max_gallons)
-             VALUES ($1, $2, $3, ${geographyPoint(4, 5)}, $6, $7, $8, $9)
+                                 difficulty_tier, estimated_volume_min_gallons, estimated_volume_max_gallons,
+                                 place_name)
+             VALUES ($1, $2, $3, ${geographyPoint(4, 5)}, $6, $7, $8, $9, $10)
              RETURNING id`,
             [
               userId,
@@ -126,6 +133,7 @@ const reportRoutes: FastifyPluginAsyncZod = async (app) => {
               difficultyTier({ categories, hazards, estimatedVolume }),
               estimatedVolume?.minGallons ?? null,
               estimatedVolume?.maxGallons ?? null,
+              placeName ?? null,
             ],
           );
           const id = rows[0]!.id;

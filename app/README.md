@@ -12,6 +12,17 @@ See the repo root for the product and API docs.
 The app calls the API at `http://localhost:3000` (`http://10.0.2.2:3000` on the Android emulator).
 On a physical device, copy `.env.example` to `.env.local` and set `EXPO_PUBLIC_API_URL` to your computer's LAN address.
 
+## Google Maps
+
+The events map needs `GOOGLE_MAPS_API_KEY`, with the Maps SDK for Android (and iOS) enabled in Google Cloud.
+Put it in Infisical or `.env.local` (see `.env.example`).
+It is baked into the native app, so after setting or changing it, regenerate the native project and rebuild:
+
+```bash
+npx expo prebuild --clean
+npm run android
+```
+
 ## Layout
 
 - `src/app/`: screens and layouts (Expo Router).
