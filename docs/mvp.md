@@ -342,7 +342,7 @@ The core loop ships first so there is always a working demo.
 
 Done:
 
-- Schema migrations `001` to `007` are applied to the DEV Tiger service and tested (`005` is on the `biohazard-dropoffs` branch).
+- Schema migrations `001` to `008` are applied to the DEV Tiger service and tested (`005` is on the `biohazard-dropoffs` branch).
 - API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, quests, events and scheduled parties with GPS check-in and presence, ending a party with XP from presence pings and the hotspot bonus, daily, weekly, monthly and all-time leaderboards, hotspots, equipment and drop-offs.
 
 Open:

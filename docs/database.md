@@ -13,8 +13,7 @@ For the product side, see [mvp.md](mvp.md).
 | Service | `clean-pursuit` (id `sm60nzjanh`), DEV, us-east-1 |
 | Postgres | 18.6, with built-in `uuidv7()` |
 | Extensions | TimescaleDB 2.30, PostGIS 3.6, h3 + h3_postgis 4.2 (pulls in postgis_raster), citext |
-| Applied | `001_initial_schema.sql`, `002_leaderboards_and_hotspots.sql`, `003_photo_analysis.sql`, `004_volume_estimates.sql`, `006_report_place_names.sql`, `007_equipment_seed.sql`, plus `005` from the `biohazard-dropoffs` branch |
-| Pending | `008_leaderboard_index.sql` |
+| Applied | `001_initial_schema.sql`, `002_leaderboards_and_hotspots.sql`, `003_photo_analysis.sql`, `004_volume_estimates.sql`, `006_report_place_names.sql`, `007_equipment_seed.sql`, `008_leaderboard_index.sql`, plus `005` from the `biohazard-dropoffs` branch |
 | Credentials | Connection string stored in Infisical, never in the repo |
 
 ## Conventions
@@ -233,7 +232,7 @@ All aggregates are real-time (`materialized_only = false`) and bucket in UTC.
 
 - XP aggregates carry `xp`, `minutes_on_site` and `parties` per user per bucket, indexed on `(bucket, xp DESC)`.
 - All-time XP is `app_user.total_xp`, and the all-time leaderboard ranks it.
-  The pending `008_leaderboard_index.sql` adds an index on `(total_xp DESC, username)`.
+  `008_leaderboard_index.sql` adds an index on `(total_xp DESC, username)`, verified on DEV.
 - The daily, weekly and monthly leaderboards read the current UTC bucket from the matching aggregate.
   The current week and month are never materialized yet, so their rows are rolled up from `xp_daily_by_user` when read.
   The API filters on a range of fixed timestamps rather than `bucket = time_bucket(..., now())`, so TimescaleDB pushes the filter down to the bucket index.
