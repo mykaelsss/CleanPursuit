@@ -241,6 +241,10 @@ Ending a party awards XP to members who checked in; see [XP](docs/mvp.md#xp).
   Each entry has `xp` for the period and `totalXp` for all time.
   Users with no XP in the period are left out, and ties share a rank.
   It returns 20 entries by default and at most 100.
+  `me` gives the signed-in user's `rank`, period `xp` and `totalXp`, even outside the returned entries.
+  `me.rank` is null when the user's net XP in the period is zero or negative.
+  The app's Leaderboard tab uses this endpoint with a limit of 100 and lets users select each period.
+  The older `GET /leaderboard` endpoint still returns all-time ranks including zero-XP accounts.
 - `GET /hotspots?limit=` lists H3 areas reported in the last 30 days with their center point, distinct reporters and report count, busiest first.
   It returns 100 areas by default and at most 250.
   `isHotspot` is true when 3 or more different people reported the area, which is when cleaning it earns bonus XP.

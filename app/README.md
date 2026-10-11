@@ -18,6 +18,14 @@ The events map is [Leaflet](https://leafletjs.com) with OpenStreetMap's standard
 Those tiles are run by volunteers, so follow the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/): fine for development and a demo, but switch to a paid tile provider before a real launch.
 It runs in a WebView on phones and an iframe on web, from one page in `src/lib/leaflet-map-html.ts`.
 
+## Leaderboard
+
+The Leaderboard tab loads `GET /leaderboards?period=&limit=100` through the authenticated API client.
+It starts on all time and offers Today, This week and This month, using UTC periods with Monday as the start of the week.
+Rows show period XP, equal XP shares a rank, and accounts without positive period XP are left off the list.
+The `me` response shows your rank even outside the top 100, or Unranked when your period XP is zero or negative.
+Opening the tab or pulling to refresh fetches current results; failed refreshes keep the previous results and show a retry button.
+
 ## Layout
 
 - `src/app/`: screens and layouts (Expo Router).

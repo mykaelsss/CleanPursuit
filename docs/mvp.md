@@ -229,9 +229,13 @@ A member who earns the full 100 base XP gets no hotspot bonus, because the bonus
 The event card's "up to" figure comes from `server/src/lib/xp.ts` (100 XP per hour on site, times easy 1x, medium 1.5x, hard 2x or legendary 3x, capped at 3 hours).
 That is not what ending a party awards, so the card can show more XP than members receive.
 
-The Leaderboard tab shows all-time XP, shared ranks for equal XP, and the signed-in user's rank even when they are outside the top 100.
-It uses `GET /leaderboard`, which includes accounts with zero XP.
-`GET /leaderboards` serves the daily, weekly, monthly and all-time boards for users with positive XP in the requested period.
+The Leaderboard tab uses `GET /leaderboards` to show daily, weekly, monthly and all-time XP, with all time selected initially.
+Days, weeks and months use the current UTC period, and weeks start on Monday.
+The board shows the top 100 users with positive XP in that period, and equal XP shares a rank.
+The signed-in user's rank and period XP appear even when they are outside the top 100; zero or negative period XP means they are unranked.
+Daily, weekly and monthly views also show the user's all-time XP separately.
+Opening the tab or pulling to refresh loads current results, and a failed refresh keeps the last loaded results with a retry message.
+The older `GET /leaderboard` endpoint remains available for all-time rankings that include zero-XP accounts.
 
 ### Levels
 
