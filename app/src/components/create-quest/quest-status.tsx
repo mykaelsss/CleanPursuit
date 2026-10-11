@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import QuestIcon from '@/components/create-quest/quest-icon';
 import { ThemedText } from '@/components/themed-text';
@@ -14,15 +14,15 @@ export function CreateQuestHero() {
       </View>
       <View style={styles.heroCopy}>
         <ThemedText type="smallBold" style={{ color: theme.text }}>
-          NEW COMMUNITY MISSION
+          New community mission
         </ThemedText>
         <ThemedText type="small" style={{ color: theme.textSecondary }}>
-          Complete the details to unlock your quest
+          Complete each step to post your quest
         </ThemedText>
       </View>
       <View style={[styles.stepPill, { backgroundColor: theme.reward }]}>
         <ThemedText type="smallBold" style={{ color: theme.onReward }}>
-          4 STEPS
+          4 steps
         </ThemedText>
       </View>
     </View>
@@ -59,10 +59,10 @@ export function QuestReward() {
     <View style={[styles.reward, { backgroundColor: theme.reward }]}>
       <View style={styles.rewardCopy}>
         <ThemedText type="smallBold" style={{ color: theme.onReward }}>
-          PARTY REWARD
+          Party reward
         </ThemedText>
         <ThemedText type="small" style={{ color: theme.onReward }}>
-          Checked-in volunteers earn up to 100 XP when the leader ends a full or partial cleanup with an after photo.
+          Checked-in volunteers earn up to 100 XP on easy quests and up to 300 on legendary ones when the leader ends a full or partial cleanup with an after photo.
         </ThemedText>
       </View>
       <View style={[styles.rewardIcon, { backgroundColor: theme.backgroundElement }]}>
@@ -72,31 +72,42 @@ export function QuestReward() {
   );
 }
 
-export function CreateQuestButton({ ready, busy = false, label = 'Create quest', onPress }: {
-  ready: boolean; busy?: boolean; label?: string; onPress: () => void;
+export function CreateQuestButton({ ready, busy = false, label = 'Create quest', hint, onPress }: {
+  ready: boolean; busy?: boolean; label?: string;
+  // What is still missing, shown while the button is disabled.
+  hint?: string | null;
+  onPress: () => void;
 }) {
   const theme = useTheme();
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled: !ready || busy, busy }}
-      aria-disabled={!ready || busy}
-      aria-busy={busy}
-      disabled={!ready || busy}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.createButton,
-        { backgroundColor: ready ? theme.tint : theme.border },
-        pressed && ready && styles.createButtonPressed,
-      ]}>
-      <QuestIcon name="sparkle" color={ready ? theme.onTint : theme.textSecondary} size={22} />
-      <ThemedText
-        type="smallBold"
-        style={{ color: ready ? theme.onTint : theme.textSecondary, fontSize: 16 }}>
-        {label}
-      </ThemedText>
-    </Pressable>
+    <View style={styles.createGroup}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !ready || busy, busy }}
+        accessibilityHint={!ready && !busy && hint ? hint : undefined}
+        aria-disabled={!ready || busy}
+        aria-busy={busy}
+        disabled={!ready || busy}
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.createButton,
+          { backgroundColor: ready ? theme.tint : theme.border },
+          pressed && ready && styles.createButtonPressed,
+        ]}>
+        {busy
+          ? <ActivityIndicator color={theme.onTint} />
+          : <QuestIcon name="sparkle" color={ready ? theme.onTint : theme.textSecondary} size={22} />}
+        <ThemedText
+          type="smallBold"
+          style={{ color: ready ? theme.onTint : theme.textSecondary, fontSize: 16 }}>
+          {label}
+        </ThemedText>
+      </Pressable>
+      {!ready && !busy && hint ? (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>{hint}</ThemedText>
+      ) : null}
+    </View>
   );
 }
 
@@ -163,6 +174,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  createGroup: {
+    gap: 8,
+  },
+  hint: {
+    textAlign: 'center',
   },
   createButton: {
     minHeight: 58,

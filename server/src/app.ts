@@ -34,6 +34,7 @@ import leaderboardRoutes from './routes/leaderboard.ts';
 import meRoutes from './routes/me.ts';
 import questRoutes from './routes/quests.ts';
 import reportRoutes from './routes/reports.ts';
+import rewardRoutes from './routes/rewards.ts';
 import partiesRoutes from './routes/parties.ts';
 import leaderboardsRoutes from './routes/leaderboards.ts';
 
@@ -123,6 +124,7 @@ export async function buildApp({
   await app.register(questRoutes);
   await app.register(eventRoutes);
   await app.register(partiesRoutes);
+  await app.register(rewardRoutes);
   await app.register(leaderboardRoutes);
   await app.register(leaderboardsRoutes);
 

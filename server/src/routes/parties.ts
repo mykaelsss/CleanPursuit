@@ -1,15 +1,29 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { withTransaction } from "../lib/db.ts";
+import type { DifficultyTier } from "../lib/difficulty.ts";
 import { errorSchema, HttpError } from "../lib/errors.ts";
 import { perUserRateLimit } from "../lib/rate-limit.ts";
 import { geographyPoint, locationSchema } from "../lib/geo.ts";
+import {
+	handOffOrAbandon,
+	leaveLockedParty,
+	leaveOtherParties,
+	settleLockedParty,
+	settleParty,
+} from "../lib/parties.ts";
+import {
+	CHECK_IN_GEOFENCE_RADIUS_METERS,
+	PRESENCE_MAX_GAP_MINUTES,
+} from "../lib/presence.ts";
+import {
+	baseXp,
+	hotspotBonusXp,
+	scheduleSlotMinutes,
+	WALK_UP_SLOT_MINUTES,
+} from "../lib/xp.ts";
 
 const security = [{ bearerAuth: [] }];
-// Temporary MVP values; revisit after end-to-end demo testing.
-const CHECK_IN_GEOFENCE_RADIUS_METERS = 100;
-// The most time one gap between two on-site pings can count toward time on site.
-const PRESENCE_MAX_GAP_MINUTES = 10;
 
 const partyStatusSchema = z.enum([
 	"scheduled",
@@ -277,6 +291,283 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 		},
 	);
 
+	// Check in to a quest's bounty without signing up: join the walk-up under way,
+	// or start one as its leader.
+	app.post(
+		"/quests/:questId/walk-up",
+		{
+			onRequest: app.authenticate,
+			config: { rateLimit: perUserRateLimit(30, "1 hour") },
+			schema: {
+				tags: ["parties"],
+				summary: "Check in to a quest's walk-up cleanup",
+				description:
+					"Joins the walk-up party under way on the quest, or starts one with the signed-in user as its leader. " +
+					"Checking in again refreshes presence, and a member who left can check in again while the walk-up is under way. " +
+					"Checking in leaves any other cleanup the signed-in user is checked in to.",
+				security,
+				params: z.object({ questId: z.uuid() }),
+				body: z.object({ location: locationSchema }),
+				response: {
+					200: partySchema,
+					400: errorSchema,
+					401: errorSchema,
+					403: errorSchema,
+					404: errorSchema,
+					409: errorSchema,
+					429: errorSchema,
+				},
+			},
+		},
+		async (request) => {
+			const { questId } = request.params;
+			const userId = request.user.id;
+			const { latitude, longitude } = request.body.location;
+
+			const partyId = await withTransaction(app.db, async (client) => {
+				// Lock the quest so concurrent first check-ins start one walk-up between them.
+				const questResult = await client.query<{
+					status: string;
+					area_id: string;
+					on_site: boolean;
+				}>(
+					`SELECT
+             q.status,
+             r.area_id::text AS area_id,
+             ST_DWithin(
+               r.location,
+               ${geographyPoint(2, 3)},
+               $4
+             ) AS on_site
+           FROM quest q
+           JOIN report r ON r.id = q.report_id
+           WHERE q.id = $1
+           FOR UPDATE OF q`,
+					[questId, longitude, latitude, CHECK_IN_GEOFENCE_RADIUS_METERS],
+				);
+
+				const quest = questResult.rows[0];
+
+				if (!quest) {
+					throw new HttpError(404, "QUEST_NOT_FOUND", "Quest not found");
+				}
+
+				if (quest.status !== "open") {
+					throw new HttpError(
+						409,
+						"QUEST_NOT_OPEN",
+						"Cannot check in to a quest that is not open",
+					);
+				}
+
+				if (!quest.on_site) {
+					throw new HttpError(
+						403,
+						"CHECK_IN_OUTSIDE_GEOFENCE",
+						"You must be at the cleanup location to check in",
+					);
+				}
+
+				await leaveOtherParties(client, userId, { walkUpQuestId: questId });
+
+				const liveResult = await client.query<{ id: string }>(
+					`SELECT id
+           FROM party
+           WHERE quest_id = $1 AND status = 'active' AND scheduled_start IS NULL
+           FOR UPDATE`,
+					[questId],
+				);
+
+				let partyId = liveResult.rows[0]?.id;
+
+				if (partyId) {
+					await settleLockedParty(client, {
+						id: partyId,
+						questId,
+						areaId: quest.area_id,
+					});
+
+					const settled = await client.query<{ status: PartyStatus }>(
+						`SELECT status FROM party WHERE id = $1`,
+						[partyId],
+					);
+
+					if (settled.rows[0]!.status !== "active") partyId = undefined;
+				}
+
+				if (!partyId) {
+					// The leader must be a member; the foreign key is deferred, so the
+					// membership below goes in the same transaction.
+					const inserted = await client.query<{ id: string }>(
+						`INSERT INTO party (quest_id, leader_user_id, status, started_at)
+             VALUES ($1, $2, 'active', now())
+             RETURNING id`,
+						[questId, userId],
+					);
+					partyId = inserted.rows[0]!.id;
+				}
+
+				const memberResult = await client.query<{ status: string }>(
+					`SELECT status
+           FROM party_member
+           WHERE party_id = $1 AND user_id = $2
+           FOR UPDATE`,
+					[partyId, userId],
+				);
+
+				const memberStatus = memberResult.rows[0]?.status;
+
+				if (memberStatus === "checked_in") {
+					// Checking in again refreshes presence without a new activity event.
+					await client.query(
+						`UPDATE party_member
+             SET last_on_site_at = now()
+             WHERE party_id = $1 AND user_id = $2`,
+						[partyId, userId],
+					);
+				} else {
+					if (memberStatus) {
+						// A member who left comes back, keeping their first check-in time.
+						await client.query(
+							`UPDATE party_member
+               SET status = 'checked_in',
+                   last_on_site_at = now(),
+                   left_at = NULL,
+                   left_reason = NULL
+               WHERE party_id = $1 AND user_id = $2`,
+							[partyId, userId],
+						);
+					} else {
+						await client.query(
+							`INSERT INTO party_member
+                 (party_id, user_id, status, checked_in_at, last_on_site_at)
+               VALUES ($1, $2, 'checked_in', now(), now())`,
+							[partyId, userId],
+						);
+					}
+
+					await client.query(
+						`INSERT INTO activity_event
+               (kind, user_id, area_id, quest_id, party_id)
+             VALUES ('party_checked_in', $1, $2, $3, $4)`,
+						[userId, quest.area_id, questId, partyId],
+					);
+				}
+
+				await client.query(
+					`INSERT INTO presence_ping
+             (party_id, user_id, recorded_at, location, on_site)
+           VALUES ($1, $2, now(), ${geographyPoint(3, 4)}, true)`,
+					[partyId, userId, longitude, latitude],
+				);
+
+				return partyId;
+			});
+
+			const party = await findParty(app, partyId);
+
+			if (!party) {
+				throw new HttpError(
+					500,
+					"PARTY_CHECK_IN_FETCH_FAILED",
+					"Failed to load party after check-in",
+				);
+			}
+
+			return party;
+		},
+	);
+
+	// Leave a party after checking in. A leader who leaves hands off to the member
+	// who checked in earliest; see handOffOrAbandon for a party nobody is left at.
+	app.post(
+		"/parties/:partyId/leave",
+		{
+			onRequest: app.authenticate,
+			config: { rateLimit: perUserRateLimit(30, "1 hour") },
+			schema: {
+				tags: ["parties"],
+				summary: "Leave a cleanup you checked in to",
+				description:
+					"Members keep the time they spent on site and earn XP if the party ends with an after photo. " +
+					"A leader who leaves hands off to the member who checked in earliest and is still there. " +
+					"To withdraw from an event before checking in, use DELETE /events/{id}/join.",
+				security,
+				params: z.object({ partyId: z.uuid() }),
+				response: {
+					200: partySchema,
+					400: errorSchema,
+					401: errorSchema,
+					404: errorSchema,
+					409: errorSchema,
+					429: errorSchema,
+				},
+			},
+		},
+		async (request) => {
+			const { partyId } = request.params;
+			const userId = request.user.id;
+
+			await settleParty(app.db, partyId);
+
+			await withTransaction(app.db, async (client) => {
+				const result = await client.query<{
+					status: PartyStatus;
+					quest_id: string;
+					area_id: string;
+				}>(
+					`SELECT p.status, p.quest_id, r.area_id::text AS area_id
+           FROM party p
+           JOIN quest q ON q.id = p.quest_id
+           JOIN report r ON r.id = q.report_id
+           WHERE p.id = $1
+           FOR UPDATE OF p`,
+					[partyId],
+				);
+
+				const party = result.rows[0];
+
+				if (!party) {
+					throw new HttpError(404, "PARTY_NOT_FOUND", "Party not found");
+				}
+
+				if (party.status !== "active") {
+					throw new HttpError(
+						409,
+						"PARTY_NOT_ACTIVE",
+						"This party is not under way",
+					);
+				}
+
+				const left = await leaveLockedParty(
+					client,
+					{ id: partyId, questId: party.quest_id, areaId: party.area_id },
+					userId,
+				);
+
+				if (!left) {
+					throw new HttpError(
+						409,
+						"MEMBER_NOT_CHECKED_IN",
+						"You are not checked in to this party",
+					);
+				}
+			});
+
+			const party = await findParty(app, partyId);
+
+			if (!party) {
+				throw new HttpError(
+					500,
+					"PARTY_LEAVE_FETCH_FAILED",
+					"Failed to load party after leaving",
+				);
+			}
+
+			return party;
+		},
+	);
+
 	// Check in to a scheduled cleanup party.
 	app.post(
 		"/parties/:partyId/check-in",
@@ -286,6 +577,10 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			schema: {
 				tags: ["parties"],
 				summary: "Check in to a scheduled cleanup party",
+				description:
+					"Opens at the scheduled start and closes at the scheduled end. " +
+					"A member who left can check in again, keeping their first check-in time. " +
+					"Checking in leaves any other cleanup the signed-in user is checked in to.",
 				security,
 				params: z.object({ partyId: z.uuid() }),
 				body: z.object({ location: locationSchema }),
@@ -304,6 +599,10 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			const { partyId } = request.params;
 			const userId = request.user.id;
 			const { latitude, longitude } = request.body.location;
+
+			// A member who timed out checks in again, and a party past its end with
+			// nobody left is abandoned first.
+			await settleParty(app.db, partyId);
 
 			await withTransaction(app.db, async (client) => {
 				// Lock the party so concurrent check-ins are serialized.
@@ -362,7 +661,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					throw new HttpError(
 						409,
 						"PARTY_NOT_SCHEDULED",
-						"Use walk-up check-in for parties without a schedule",
+						"Check in to a walk-up from its quest instead",
 					);
 				}
 
@@ -403,7 +702,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					);
 				}
 
-				if (member.status !== "signed_up" && member.status !== "checked_in") {
+				if (member.status === "no_show") {
 					throw new HttpError(
 						409,
 						"MEMBERSHIP_NOT_CHECKINABLE",
@@ -419,12 +718,17 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					);
 				}
 
-				if (member.status === "signed_up") {
+				await leaveOtherParties(client, userId, { partyId });
+
+				if (member.status === "signed_up" || member.status === "left") {
+					// A member who left comes back, keeping their first check-in time.
 					await client.query(
 						`UPDATE party_member
              SET status = 'checked_in',
-                 checked_in_at = now(),
-                 last_on_site_at = now()
+                 checked_in_at = coalesce(checked_in_at, now()),
+                 last_on_site_at = now(),
+                 left_at = NULL,
+                 left_reason = NULL
              WHERE party_id = $1 AND user_id = $2`,
 						[partyId, userId],
 					);
@@ -454,6 +758,9 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 						[partyId, userId],
 					);
 				}
+
+				// The first to check in after the leader left takes over.
+				await handOffOrAbandon(client, partyId);
 
 				await client.query(
 					`INSERT INTO presence_ping
@@ -506,6 +813,9 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			const { partyId } = request.params;
 			const userId = request.user.id;
 			const { latitude, longitude } = request.body.location;
+
+			// A member who timed out must check in again.
+			await settleParty(app.db, partyId);
 
 			return withTransaction(app.db, async (client) => {
 				const partyResult = await client.query<{
@@ -593,7 +903,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 		},
 	);
 
-	// End an active scheduled cleanup and award time-based XP.
+	// End an active cleanup and award time-based XP.
 	app.post(
 		"/parties/:partyId/end",
 		{
@@ -625,6 +935,9 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			const { afterPhotoFileId, bagCount, outcome } = request.body;
 			const userId = request.user.id;
 
+			// A leader who timed out has already handed off.
+			await settleParty(app.db, partyId);
+
 			await withTransaction(app.db, async (client) => {
 				// Lock both records to serialize concurrent attempts to end a party
 				// and to complete its quest.
@@ -636,6 +949,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					scheduled_end: Date | null;
 					quest_status: string;
 					area_id: string;
+					difficulty_tier: DifficultyTier;
 				}>(
 					`SELECT
              p.quest_id,
@@ -644,7 +958,8 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
              p.scheduled_start,
              p.scheduled_end,
              q.status AS quest_status,
-             r.area_id::text AS area_id
+             r.area_id::text AS area_id,
+             r.difficulty_tier
            FROM party p
            JOIN quest q ON q.id = p.quest_id
            JOIN report r ON r.id = q.report_id
@@ -675,7 +990,11 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					);
 				}
 
-				if (party.quest_status !== "open") {
+				// A party still under way when another party completed the quest can
+				// end too, so its members earn XP for their time; the quest stays as it is.
+				// Presence pings stop counting once the quest is completed, since the
+				// presence route refuses them.
+				if (party.quest_status !== "open" && party.quest_status !== "completed") {
 					throw new HttpError(
 						409,
 						"QUEST_NOT_OPEN",
@@ -683,15 +1002,8 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					);
 				}
 
-				// This demo flow uses scheduled event duration for XP calculation.
-				// Walk-up parties are deferred to a later milestone.
-				if (!party.scheduled_start || !party.scheduled_end) {
-					throw new HttpError(
-						409,
-						"PARTY_NOT_SCHEDULED",
-						"Ending walk-up parties is not supported yet",
-					);
-				}
+				const completesQuest =
+					outcome === "completed" && party.quest_status === "open";
 
 				const nowResult = await client.query<{ ended_at: Date }>(
 					`SELECT clock_timestamp() AS ended_at`,
@@ -773,9 +1085,9 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 				// both on site, each gap counting at most PRESENCE_MAX_GAP_MINUTES. Time
 				// before check-in, after the scheduled end, or after this party-ending
 				// operation never counts, and time spent off site between pings is dropped.
-				const countUntil = new Date(
-					Math.min(party.scheduled_end.getTime(), endedAt.getTime()),
-				);
+				const countUntil = party.scheduled_end
+					? new Date(Math.min(party.scheduled_end.getTime(), endedAt.getTime()))
+					: endedAt;
 				const presenceResult = await client.query<{
 					user_id: string;
 					minutes_on_site: number;
@@ -807,17 +1119,11 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					presenceResult.rows.map((row) => [row.user_id, row.minutes_on_site]),
 				);
 
-				const durationMinutes = Math.min(
-					100,
-					Math.max(
-						1,
-						Math.floor(
-							(party.scheduled_end.getTime() -
-								party.scheduled_start.getTime()) /
-								60_000,
-						),
-					),
-				);
+				// Being on site for the whole time slot earns the tier's full base XP.
+				const slotMinutes =
+					party.scheduled_start && party.scheduled_end
+						? scheduleSlotMinutes(party.scheduled_start, party.scheduled_end)
+						: WALK_UP_SLOT_MINUTES;
 
 				const participants = membersResult.rows
 					.filter(
@@ -828,9 +1134,10 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					.map((member) => {
 						const minutesOnSite = minutesOnSiteByUser.get(member.user_id) ?? 0;
 
-						const xp = Math.floor(
-							(100 * Math.min(minutesOnSite, durationMinutes)) /
-								durationMinutes,
+						const xp = baseXp(
+							party.difficulty_tier,
+							minutesOnSite,
+							slotMinutes,
 						);
 
 						return {
@@ -940,14 +1247,11 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
                                             ],
                                     );
 
-                                    const hotspotBonusXp = qualifiesForHotspotBonus
-                                            ? Math.min(
-                                                      Math.floor((member.xp * 20) / 100),
-                                                      Math.max(0, 100 - member.xp),
-                                              )
+                                    const bonusXp = qualifiesForHotspotBonus
+                                            ? hotspotBonusXp(party.difficulty_tier, member.xp)
                                             : 0;
 
-                                    if (hotspotBonusXp > 0) {
+                                    if (bonusXp > 0) {
                                             await client.query(
                                                     `INSERT INTO activity_event
                  (kind, user_id, guild_id, area_id, quest_id, party_id, xp)
@@ -958,7 +1262,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
                                                             party.area_id,
                                                             party.quest_id,
                                                             partyId,
-                                                            hotspotBonusXp,
+                                                            bonusXp,
                                                     ],
                                             );
                                     }
@@ -967,11 +1271,11 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
                                             `UPDATE app_user
              SET total_xp = total_xp + $2
              WHERE id = $1`,
-                                            [member.userId, member.xp + hotspotBonusXp],
+                                            [member.userId, member.xp + bonusXp],
                                     );
                             }
 
-				if (outcome === "completed") {
+				if (completesQuest) {
 					await client.query(
 						`UPDATE quest
              SET status = 'completed',
@@ -993,6 +1297,15 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 							partyId,
 						],
 					);
+
+					// Scheduled parties that have not started are no longer needed.
+					await client.query(
+						`UPDATE party
+             SET status = 'cancelled',
+                 ended_at = $2
+             WHERE quest_id = $1 AND status = 'scheduled'`,
+						[party.quest_id, endedAt],
+					);
 				}
 				// A partial cleanup deliberately leaves the quest open.
 			});
@@ -1008,6 +1321,50 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			}
 
 			return updatedParty;
+		},
+	);
+
+	// The cleanup the signed-in user is checked in to, walk-up or event, so the app
+	// can keep sending location pings after it restarts.
+	app.get(
+		"/me/party",
+		{
+			onRequest: app.authenticate,
+			schema: {
+				tags: ["parties"],
+				summary: "Get the cleanup you are checked in to",
+				description:
+					"Applies the presence timeout first, so a member who has been away too long gets null.",
+				security,
+				response: {
+					200: z.object({ party: partySchema.nullable() }),
+					401: errorSchema,
+				},
+			},
+		},
+		async (request) => {
+			const findLive = async () => {
+				const { rows } = await app.db.query<{ id: string }>(
+					`SELECT p.id
+           FROM party p
+           JOIN party_member m ON m.party_id = p.id
+           WHERE m.user_id = $1
+             AND m.status = 'checked_in'
+             AND p.status = 'active'
+           ORDER BY m.checked_in_at DESC, p.id
+           LIMIT 1`,
+					[request.user.id],
+				);
+				return rows[0]?.id ?? null;
+			};
+
+			const candidate = await findLive();
+			if (!candidate) return { party: null };
+
+			await settleParty(app.db, candidate);
+
+			const partyId = await findLive();
+			return { party: partyId ? await findParty(app, partyId) : null };
 		},
 	);
 
@@ -1029,6 +1386,8 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			},
 		},
 		async (request) => {
+			// So members who walked away from a walk-up show as having left.
+			await settleParty(app.db, request.params.partyId);
 			const party = await findParty(app, request.params.partyId);
 			if (!party)
 				throw new HttpError(404, "PARTY_NOT_FOUND", "Party not found");

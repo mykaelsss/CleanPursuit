@@ -6,10 +6,13 @@ import { type DifficultyTier, difficultyTierSchema } from '../lib/difficulty.ts'
 import { errorSchema, HttpError } from '../lib/errors.ts';
 import { photoSchema } from '../lib/files.ts';
 import { geographyPoint, locationSchema, placeNameSchema, selectLocation } from '../lib/geo.ts';
+import { settleParty } from '../lib/parties.ts';
+import { MEMBER_TIMEOUT_MINUTES } from '../lib/presence.ts';
 import { perUserRateLimit } from '../lib/rate-limit.ts';
 import type { Storage } from '../lib/storage.ts';
 import { userSummarySchema } from '../lib/users.ts';
-import { maxXpForSchedule } from '../lib/xp.ts';
+import { toWalkUp, WALK_UP_COLUMNS, WALK_UP_JOIN, type WalkUpRow, walkUpSchema } from '../lib/walk-ups.ts';
+import { TIER_MAX_XP } from '../lib/xp.ts';
 
 // An event is a scheduled party: one attempt at a quest, with a time slot and an organizer (the leader).
 
@@ -25,7 +28,12 @@ const eventSchema = z.object({
   placeName: placeNameSchema.nullable(),
   areaId: z.string().describe('H3 area of the report, to match against /hotspots'),
   difficultyTier: difficultyTierSchema,
-  status: z.enum(['scheduled', 'active']).describe('active once someone has checked in'),
+  status: z
+    .enum(['scheduled', 'active', 'completed', 'partial', 'abandoned', 'cancelled'])
+    .describe(
+      'active once someone has checked in. Only GET /events/{id} returns events that have ended: completed or ' +
+        'partial when the leader ended it with an after photo, abandoned when everyone left, cancelled when called off',
+    ),
   scheduledStart: z.iso.datetime(),
   scheduledEnd: z.iso.datetime(),
   organizer: userSummarySchema,
@@ -33,7 +41,12 @@ const eventSchema = z.object({
   photo: photoSchema,
   attendeeCount: z.number().int().describe('Signed-up and checked-in members, including the organizer'),
   joined: z.boolean().describe('Whether the signed-in user is attending'),
+  myStatus: z
+    .enum(['signed_up', 'checked_in', 'left', 'no_show'])
+    .nullable()
+    .describe("The signed-in user's membership; `left` members can check in again until the scheduled end"),
   isOrganizer: z.boolean(),
+  walkUp: walkUpSchema.describe("A walk-up cleanup under way on the event's quest, which anyone at the spot can join now"),
 });
 
 const eventSummarySchema = eventSchema.extend({
@@ -56,6 +69,12 @@ type EventDetail = z.infer<typeof eventDetailSchema>;
 const ATTENDING = `('signed_up', 'checked_in')`;
 // Events that can still be joined: scheduled or under way, and not over yet.
 const OPEN_EVENT = `p.scheduled_start IS NOT NULL AND p.status IN ('scheduled', 'active') AND p.scheduled_end > now()`;
+// Events to list: open ones, and ones past their end with someone still on site, which stay
+// until the leader ends them with an after photo.
+const LISTED_EVENT = `(${OPEN_EVENT} OR (p.scheduled_start IS NOT NULL AND p.status = 'active' AND EXISTS (
+  SELECT 1 FROM party_member m
+  WHERE m.party_id = p.id AND m.status = 'checked_in'
+    AND coalesce(m.last_on_site_at, m.checked_in_at) >= now() - make_interval(mins => ${MEMBER_TIMEOUT_MINUTES}))))`;
 
 // $1 is the signed-in user's id.
 const EVENT_COLUMNS = `
@@ -65,16 +84,19 @@ const EVENT_COLUMNS = `
   (SELECT count(*)::integer FROM party_member m
    WHERE m.party_id = p.id AND m.status IN ${ATTENDING}) AS attendee_count,
   EXISTS (SELECT 1 FROM party_member m
-          WHERE m.party_id = p.id AND m.user_id = $1 AND m.status IN ${ATTENDING}) AS joined`;
+          WHERE m.party_id = p.id AND m.user_id = $1 AND m.status IN ${ATTENDING}) AS joined,
+  (SELECT m.status FROM party_member m WHERE m.party_id = p.id AND m.user_id = $1) AS my_status,
+  ${WALK_UP_COLUMNS}`;
 
 const EVENT_FROM = `
   FROM party p
   JOIN quest q ON q.id = p.quest_id
   JOIN report r ON r.id = q.report_id
   JOIN file f ON f.id = r.photo_file_id
-  JOIN app_user u ON u.id = p.leader_user_id`;
+  JOIN app_user u ON u.id = p.leader_user_id
+  ${WALK_UP_JOIN}`;
 
-interface EventRow {
+interface EventRow extends WalkUpRow {
   id: string;
   quest_id: string;
   leader_user_id: string;
@@ -93,6 +115,7 @@ interface EventRow {
   photo_key: string;
   attendee_count: number;
   joined: boolean;
+  my_status: Event['myStatus'];
 }
 
 async function toEvent(row: EventRow, userId: string, storage: Storage): Promise<Event> {
@@ -109,11 +132,13 @@ async function toEvent(row: EventRow, userId: string, storage: Storage): Promise
     scheduledStart: row.scheduled_start.toISOString(),
     scheduledEnd: row.scheduled_end.toISOString(),
     organizer: { id: row.leader_user_id, username: row.organizer_username },
-    maxXp: maxXpForSchedule(row.difficulty_tier, row.scheduled_start, row.scheduled_end),
+    maxXp: TIER_MAX_XP[row.difficulty_tier],
     photo: { id: row.photo_file_id, url: await storage.presignDownload(row.photo_key) },
     attendeeCount: row.attendee_count,
     joined: row.joined,
+    myStatus: row.my_status,
     isOrganizer: row.leader_user_id === userId,
+    walkUp: toWalkUp(row),
   };
 }
 
@@ -125,7 +150,7 @@ async function findEvent(
 ): Promise<EventDetail | null> {
   const { rows } = await db.query<EventRow>(
     `SELECT ${EVENT_COLUMNS} ${EVENT_FROM}
-     WHERE p.id = $2 AND p.scheduled_start IS NOT NULL AND p.status IN ('scheduled', 'active')`,
+     WHERE p.id = $2 AND p.scheduled_start IS NOT NULL`,
     [userId, id],
   );
   const row = rows[0];
@@ -171,6 +196,7 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ['events'],
         summary: 'List upcoming and in-progress events near a location, soonest first',
+        description: 'An event past its scheduled end stays listed while anyone is still on site, until its leader ends it.',
         security,
         querystring: z.object({
           latitude: z.coerce.number().min(-90).max(90),
@@ -187,7 +213,7 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
         `SELECT ${EVENT_COLUMNS},
                 round(ST_Distance(r.location, ${geographyPoint(3, 2)}))::integer AS distance_m
          ${EVENT_FROM}
-         WHERE ${OPEN_EVENT}
+         WHERE ${LISTED_EVENT}
            AND ST_DWithin(r.location, ${geographyPoint(3, 2)}, $4)
          ORDER BY p.scheduled_start, distance_m, p.id
          LIMIT $5`,
@@ -210,13 +236,19 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ['events'],
         summary: 'Get an event with its attendees',
-        description: "Attendees' emails are included only for the organizer.",
+        description:
+          "Attendees' emails are included only for the organizer. Events that have ended are returned too, " +
+          'so a card left open can show how it went.',
         security,
         params: z.object({ id: z.uuid() }),
         response: { 200: eventDetailSchema, 400: errorSchema, 401: errorSchema, 404: errorSchema },
       },
     },
-    async (request) => requireEvent(request.params.id, request.user.id),
+    async (request) => {
+      // So members who walked away show as having left, and a leader who did hands off.
+      await settleParty(app.db, request.params.id);
+      return requireEvent(request.params.id, request.user.id);
+    },
   );
 
   app.post(
@@ -286,6 +318,58 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
         request.user.id,
       ]);
       return requireEvent(id, request.user.id);
+    },
+  );
+
+  // Call off an event before it starts. Once someone has checked in, the leader ends it instead.
+  app.post(
+    '/events/:id/cancel',
+    {
+      onRequest: app.authenticate,
+      config: { rateLimit: perUserRateLimit(30, '1 hour') },
+      schema: {
+        tags: ['events'],
+        summary: 'Call off an event before it starts',
+        description: 'Only the organizer can call off an event, and only before anyone has checked in.',
+        security,
+        params: z.object({ id: z.uuid() }),
+        response: {
+          204: z.null(),
+          400: errorSchema,
+          401: errorSchema,
+          403: errorSchema,
+          404: errorSchema,
+          409: errorSchema,
+          429: errorSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params;
+      await withTransaction(app.db, async (client) => {
+        const { rows } = await client.query<{ leader_user_id: string; status: string }>(
+          `SELECT leader_user_id, status FROM party
+           WHERE id = $1 AND scheduled_start IS NOT NULL
+           FOR UPDATE`,
+          [id],
+        );
+        const event = rows[0];
+        if (!event) throw new HttpError(404, 'EVENT_NOT_FOUND', 'Party not found');
+        if (event.leader_user_id !== request.user.id) {
+          throw new HttpError(403, 'PARTY_LEADER_REQUIRED', 'Only the party leader can call off this party');
+        }
+        if (event.status !== 'scheduled') {
+          throw new HttpError(
+            409,
+            'EVENT_NOT_CANCELLABLE',
+            event.status === 'active'
+              ? 'Someone has checked in, so end the party instead'
+              : 'This party has already ended or was called off',
+          );
+        }
+        await client.query(`UPDATE party SET status = 'cancelled', ended_at = now() WHERE id = $1`, [id]);
+      });
+      return reply.status(204).send(null);
     },
   );
 

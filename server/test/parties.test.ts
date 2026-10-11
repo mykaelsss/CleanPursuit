@@ -140,6 +140,7 @@ async function createQuest(
   storage: FakeStorage,
   authorization: string,
   spot: { latitude: number; longitude: number },
+  hazards: string[] = [],
 ) {
   const report = await app.inject({
     method: 'POST',
@@ -150,7 +151,7 @@ async function createQuest(
       description: 'Integration test litter report',
       location: spot,
       categories: ['mixed'],
-      hazards: [],
+      hazards,
     },
   });
 
@@ -196,6 +197,62 @@ async function createScheduledParty(
   createdPartyIds.push(partyId);
 
   return { partyId, scheduledStart: start };
+}
+
+async function walkUp(
+  app: App,
+  authorization: string,
+  questId: string,
+  location: { latitude: number; longitude: number },
+) {
+  const response = await app.inject({
+    method: 'POST',
+    url: `/quests/${questId}/walk-up`,
+    headers: { authorization },
+    payload: { location },
+  });
+  if (response.statusCode === 200) createdPartyIds.push(response.json().id);
+  return response;
+}
+
+// Schedules an event, then moves its start a minute into the past so check-in is open.
+async function startedEvent(
+  app: App,
+  pool: ReturnType<typeof createPool>,
+  authorization: string,
+  questId: string,
+) {
+  const { partyId } = await createScheduledParty(app, authorization, questId);
+  await pool.query(
+    `UPDATE party SET scheduled_start = now() - interval '1 minute' WHERE id = $1`,
+    [partyId],
+  );
+  return partyId;
+}
+
+async function post(app: App, authorization: string, url: string, payload?: object) {
+  return app.inject({ method: 'POST', url, headers: { authorization }, payload });
+}
+
+interface PartyJson {
+  status: string;
+  endedAt: string | null;
+  leader: { id: string };
+  members: Array<{ userId: string; status: string; checkedInAt: string | null }>;
+}
+
+async function getParty(app: App, authorization: string, partyId: string): Promise<PartyJson> {
+  const response = await app.inject({
+    method: 'GET',
+    url: `/parties/${partyId}`,
+    headers: { authorization },
+  });
+  assert.equal(response.statusCode, 200);
+  return response.json();
+}
+
+function memberOf<M extends { userId: string; status: string }>(party: { members: M[] }, userId: string) {
+  return party.members.find((member) => member.userId === userId);
 }
 
 describe('parties', { skip }, () => {
@@ -972,6 +1029,653 @@ describe('parties', { skip }, () => {
 
     assert.equal(reuseAttempt.statusCode, 409);
     assert.equal(reuseAttempt.json().code, 'PHOTO_ALREADY_USED');
+  });
+
+  test('a walk-up starts on the first check-in, others join it, and the leader hands off on leaving', async (t) => {
+    const { app, storage } = await startApp(t);
+    const first = await signUp(app);
+    const second = await signUp(app);
+    const spot = randomSpot();
+    // Bulky items make the quest medium, so a full share of the slot is worth 150 XP.
+    const questId = await createQuest(app, storage, first.authorization, spot, ['bulky_items']);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const outside = await walkUp(app, first.authorization, questId, {
+      latitude: spot.latitude + 1,
+      longitude: spot.longitude,
+    });
+    assert.equal(outside.statusCode, 403);
+    assert.equal(outside.json().code, 'CHECK_IN_OUTSIDE_GEOFENCE');
+
+    const started = await walkUp(app, first.authorization, questId, spot);
+    assert.equal(started.statusCode, 200);
+    const party = started.json();
+    assert.equal(party.status, 'active');
+    assert.equal(party.scheduledStart, null);
+    assert.equal(party.leader.id, first.userId);
+    assert.equal(memberOf(party, first.userId)?.status, 'checked_in');
+
+    const joined = await walkUp(app, second.authorization, questId, spot);
+    assert.equal(joined.statusCode, 200);
+    assert.equal(joined.json().id, party.id);
+    assert.equal(joined.json().leader.id, first.userId);
+    assert.equal(memberOf(joined.json(), second.userId)?.status, 'checked_in');
+
+    // Checking in again refreshes presence without a second check-in event.
+    const again = await walkUp(app, second.authorization, questId, spot);
+    assert.equal(again.json().id, party.id);
+    const checkIns = await pool.query(
+      `SELECT count(*)::int AS count FROM activity_event
+       WHERE party_id = $1 AND user_id = $2 AND kind = 'party_checked_in'`,
+      [party.id, second.userId],
+    );
+    assert.equal(checkIns.rows[0].count, 1);
+
+    const quest = await app.inject({
+      method: 'GET',
+      url: `/quests/${questId}`,
+      headers: { authorization: second.authorization },
+    });
+    assert.equal(quest.statusCode, 200);
+    assert.equal(quest.json().maxXp, 150);
+    assert.equal(quest.json().walkUp.partyId, party.id);
+    assert.equal(quest.json().walkUp.checkedInCount, 2);
+
+    // A scheduled party that has not started is cancelled when the walk-up completes the quest.
+    const later = await createScheduledParty(app, second.authorization, questId);
+
+    const afterPhotoFileId = await uploadPhoto(app, storage, second.authorization);
+    const endRequest = (authorization: string) =>
+      app.inject({
+        method: 'POST',
+        url: `/parties/${party.id}/end`,
+        headers: { authorization },
+        payload: { afterPhotoFileId, bagCount: 3, outcome: 'completed' },
+      });
+
+    const notLeader = await endRequest(second.authorization);
+    assert.equal(notLeader.statusCode, 403);
+    assert.equal(notLeader.json().code, 'PARTY_LEADER_REQUIRED');
+
+    const left = await app.inject({
+      method: 'POST',
+      url: `/parties/${party.id}/leave`,
+      headers: { authorization: first.authorization },
+    });
+    assert.equal(left.statusCode, 200);
+    assert.equal(left.json().status, 'active');
+    assert.equal(left.json().leader.id, second.userId);
+    assert.equal(memberOf(left.json(), first.userId)?.status, 'left');
+
+    const leftAgain = await app.inject({
+      method: 'POST',
+      url: `/parties/${party.id}/leave`,
+      headers: { authorization: first.authorization },
+    });
+    assert.equal(leftAgain.statusCode, 409);
+    assert.equal(leftAgain.json().code, 'MEMBER_NOT_CHECKED_IN');
+
+    // 30 minutes on site is half of the 60-minute walk-up slot; 20 minutes is a third.
+    await setPings(pool, party.id, second.userId, spot, [
+      { minutesAgo: 31, onSite: true },
+      { minutesAgo: 21, onSite: true },
+      { minutesAgo: 11, onSite: true },
+      { minutesAgo: 1, onSite: true },
+    ]);
+    await setPings(pool, party.id, first.userId, spot, [
+      { minutesAgo: 25, onSite: true },
+      { minutesAgo: 15, onSite: true },
+      { minutesAgo: 5, onSite: true },
+    ]);
+
+    const end = await endRequest(second.authorization);
+    assert.equal(end.statusCode, 200);
+    assert.equal(end.json().status, 'completed');
+
+    const awards = await pool.query(
+      `SELECT user_id, xp, minutes_on_site FROM activity_event
+       WHERE party_id = $1 AND kind = 'party_xp_awarded'`,
+      [party.id],
+    );
+    const xpByUser = new Map(awards.rows.map((row) => [row.user_id, row]));
+    assert.equal(xpByUser.get(second.userId)?.minutes_on_site, 30);
+    assert.equal(xpByUser.get(second.userId)?.xp, 75);
+    assert.equal(xpByUser.get(first.userId)?.minutes_on_site, 20);
+    assert.equal(xpByUser.get(first.userId)?.xp, 50);
+
+    const after = await pool.query(
+      `SELECT
+         (SELECT status FROM quest WHERE id = $1) AS quest_status,
+         (SELECT status FROM party WHERE id = $2) AS later_status`,
+      [questId, later.partyId],
+    );
+    assert.equal(after.rows[0].quest_status, 'completed');
+    assert.equal(after.rows[0].later_status, 'cancelled');
+  });
+
+  test('walk-up members time out, an empty walk-up is abandoned, and the next check-in starts a new one', async (t) => {
+    const { app, storage } = await startApp(t);
+    const first = await signUp(app);
+    const second = await signUp(app);
+    const spot = randomSpot();
+    const questId = await createQuest(app, storage, first.authorization, spot);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const started = await walkUp(app, first.authorization, questId, spot);
+    assert.equal(started.statusCode, 200);
+    const stale = started.json();
+
+    // The leader's last on-site ping was longer ago than the 30-minute timeout.
+    await setPings(pool, stale.id, first.userId, spot, [
+      { minutesAgo: 45, onSite: true },
+      { minutesAgo: 31, onSite: true },
+    ]);
+
+    const quest = await app.inject({
+      method: 'GET',
+      url: `/quests/${questId}`,
+      headers: { authorization: second.authorization },
+    });
+    assert.equal(quest.json().walkUp, null);
+
+    const presence = await app.inject({
+      method: 'POST',
+      url: `/parties/${stale.id}/presence`,
+      headers: { authorization: first.authorization },
+      payload: { location: spot },
+    });
+    assert.equal(presence.statusCode, 409);
+
+    const fresh = await walkUp(app, second.authorization, questId, spot);
+    assert.equal(fresh.statusCode, 200);
+    assert.notEqual(fresh.json().id, stale.id);
+    assert.equal(fresh.json().leader.id, second.userId);
+
+    const old = await pool.query(
+      `SELECT p.status, p.ended_at, m.status AS member_status, m.left_reason
+       FROM party p
+       JOIN party_member m ON m.party_id = p.id AND m.user_id = $2
+       WHERE p.id = $1`,
+      [stale.id, first.userId],
+    );
+    assert.equal(old.rows[0].status, 'abandoned');
+    assert.ok(old.rows[0].ended_at);
+    assert.equal(old.rows[0].member_status, 'left');
+    assert.equal(old.rows[0].left_reason, 'geofence_timeout');
+
+    const noXp = await pool.query(
+      `SELECT count(*)::int AS count FROM activity_event
+       WHERE party_id = $1 AND kind = 'party_xp_awarded'`,
+      [stale.id],
+    );
+    assert.equal(noXp.rows[0].count, 0);
+
+    // A member who left can check in again while the walk-up is under way.
+    const joined = await walkUp(app, first.authorization, questId, spot);
+    assert.equal(joined.json().id, fresh.json().id);
+    const left = await app.inject({
+      method: 'POST',
+      url: `/parties/${fresh.json().id}/leave`,
+      headers: { authorization: first.authorization },
+    });
+    assert.equal(left.statusCode, 200);
+    const back = await walkUp(app, first.authorization, questId, spot);
+    assert.equal(back.statusCode, 200);
+    assert.equal(back.json().id, fresh.json().id);
+    assert.equal(memberOf(back.json(), first.userId)?.status, 'checked_in');
+    assert.equal(back.json().leader.id, second.userId);
+
+    // The last member leaving abandons the walk-up.
+    for (const member of [first, second]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/parties/${fresh.json().id}/leave`,
+        headers: { authorization: member.authorization },
+      });
+      assert.equal(response.statusCode, 200);
+    }
+    const abandoned = await app.inject({
+      method: 'GET',
+      url: `/parties/${fresh.json().id}`,
+      headers: { authorization: first.authorization },
+    });
+    assert.equal(abandoned.json().status, 'abandoned');
+  });
+
+  test('checking in to another walk-up leaves the first, and /me/party follows the caller', async (t) => {
+    const { app, storage } = await startApp(t);
+    const user = await signUp(app);
+    const other = await signUp(app);
+    const spotA = randomSpot();
+    const spotB = randomSpot();
+    const questA = await createQuest(app, storage, user.authorization, spotA);
+    const questB = await createQuest(app, storage, user.authorization, spotB);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const mine = () =>
+      app.inject({ method: 'GET', url: '/me/party', headers: { authorization: user.authorization } });
+
+    assert.equal((await mine()).json().party, null);
+
+    const a = await walkUp(app, user.authorization, questA, spotA);
+    assert.equal(a.statusCode, 200);
+    assert.equal((await mine()).json().party.id, a.json().id);
+
+    // Someone else keeps walk-up A going after the user moves on.
+    assert.equal((await walkUp(app, other.authorization, questA, spotA)).statusCode, 200);
+
+    // Quest B has an event later; a walk-up on it shows on the event too.
+    const { partyId: eventId } = await createScheduledParty(app, other.authorization, questB);
+    const b = await walkUp(app, user.authorization, questB, spotB);
+    assert.equal(b.statusCode, 200);
+    assert.equal((await mine()).json().party.id, b.json().id);
+
+    const event = await app.inject({
+      method: 'GET',
+      url: `/events/${eventId}`,
+      headers: { authorization: other.authorization },
+    });
+    assert.equal(event.statusCode, 200);
+    assert.equal(event.json().walkUp.partyId, b.json().id);
+    assert.equal(event.json().walkUp.checkedInCount, 1);
+
+    const left = await app.inject({
+      method: 'GET',
+      url: `/parties/${a.json().id}`,
+      headers: { authorization: user.authorization },
+    });
+    assert.equal(memberOf(left.json(), user.userId)?.status, 'left');
+    assert.equal(left.json().status, 'active');
+    assert.equal(left.json().leader.id, other.userId);
+
+    // After the timeout, the user is no longer in walk-up B.
+    await setPings(pool, b.json().id, user.userId, spotB, [{ minutesAgo: 31, onSite: true }]);
+    assert.equal((await mine()).json().party, null);
+  });
+
+  test('an event keeps its leader until someone checks in, members can leave and come back, and the next arrival leads', async (t) => {
+    const { app, storage } = await startApp(t);
+    const leader = await signUp(app);
+    const late = await signUp(app);
+    const spot = randomSpot();
+    const questId = await createQuest(app, storage, leader.authorization, spot);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const partyId = await startedEvent(app, pool, leader.authorization, questId);
+    assert.equal((await post(app, late.authorization, `/events/${partyId}/join`)).statusCode, 200);
+
+    const checkIn = (authorization: string) =>
+      post(app, authorization, `/parties/${partyId}/check-in`, { location: spot });
+
+    assert.equal((await checkIn(leader.authorization)).statusCode, 200);
+
+    // Leaving needs a check-in first; members who signed up withdraw instead.
+    const early = await post(app, late.authorization, `/parties/${partyId}/leave`);
+    assert.equal(early.statusCode, 409);
+    assert.equal(early.json().code, 'MEMBER_NOT_CHECKED_IN');
+
+    assert.equal((await post(app, leader.authorization, `/parties/${partyId}/leave`)).statusCode, 200);
+
+    // Nobody is on site, but people who signed up are still on their way.
+    let party = await getParty(app, leader.authorization, partyId);
+    assert.equal(party.status, 'active');
+    assert.equal(party.leader.id, leader.userId);
+
+    // The first to check in after the leader left takes over.
+    assert.equal((await checkIn(late.authorization)).statusCode, 200);
+    party = await getParty(app, leader.authorization, partyId);
+    assert.equal(party.leader.id, late.userId);
+
+    // The old leader comes back as a member, keeping their first check-in time.
+    const firstCheckIn = memberOf(party, leader.userId)?.checkedInAt;
+    assert.equal((await checkIn(leader.authorization)).statusCode, 200);
+    party = await getParty(app, leader.authorization, partyId);
+    assert.equal(memberOf(party, leader.userId)?.status, 'checked_in');
+    assert.equal(memberOf(party, leader.userId)?.checkedInAt, firstCheckIn);
+    assert.equal(party.leader.id, late.userId);
+
+    // Only the new leader can end it.
+    const end = (authorization: string) =>
+      uploadPhoto(app, storage, authorization).then((afterPhotoFileId) =>
+        post(app, authorization, `/parties/${partyId}/end`, {
+          afterPhotoFileId,
+          bagCount: 1,
+          outcome: 'partial',
+        }),
+      );
+    assert.equal((await end(leader.authorization)).statusCode, 403);
+    const ended = await end(late.authorization);
+    assert.equal(ended.statusCode, 200);
+    assert.equal(ended.json().status, 'partial');
+  });
+
+  test('event members time out, and an event nobody is at after its end is abandoned', async (t) => {
+    const { app, storage } = await startApp(t);
+    const leader = await signUp(app);
+    const member = await signUp(app);
+    const spot = randomSpot();
+    const questId = await createQuest(app, storage, leader.authorization, spot);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const partyId = await startedEvent(app, pool, leader.authorization, questId);
+    assert.equal((await post(app, member.authorization, `/events/${partyId}/join`)).statusCode, 200);
+    for (const user of [leader, member]) {
+      const response = await post(app, user.authorization, `/parties/${partyId}/check-in`, { location: spot });
+      assert.equal(response.statusCode, 200);
+    }
+
+    // The leader's last on-site ping was longer ago than the timeout, so the member leads.
+    await setPings(pool, partyId, leader.userId, spot, [{ minutesAgo: 31, onSite: true }]);
+    let party = await getParty(app, member.authorization, partyId);
+    assert.equal(memberOf(party, leader.userId)?.status, 'left');
+    assert.equal(party.leader.id, member.userId);
+    assert.equal(party.status, 'active');
+
+    // The event's time slot passes and the last member leaves, so nobody is coming.
+    await pool.query(
+      `UPDATE party
+       SET scheduled_start = now() - interval '2 hours', scheduled_end = now() - interval '1 minute'
+       WHERE id = $1`,
+      [partyId],
+    );
+    assert.equal((await post(app, member.authorization, `/parties/${partyId}/leave`)).statusCode, 200);
+    party = await getParty(app, member.authorization, partyId);
+    assert.equal(party.status, 'abandoned');
+    assert.ok(party.endedAt);
+  });
+
+  test('the leader can call off an event before anyone checks in', async (t) => {
+    const { app, storage } = await startApp(t);
+    const leader = await signUp(app);
+    const member = await signUp(app);
+    const spot = randomSpot();
+    const questId = await createQuest(app, storage, leader.authorization, spot);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const { partyId } = await createScheduledParty(app, leader.authorization, questId);
+    assert.equal((await post(app, member.authorization, `/events/${partyId}/join`)).statusCode, 200);
+
+    const byMember = await post(app, member.authorization, `/events/${partyId}/cancel`);
+    assert.equal(byMember.statusCode, 403);
+
+    assert.equal((await post(app, leader.authorization, `/events/${partyId}/cancel`)).statusCode, 204);
+    const party = await getParty(app, leader.authorization, partyId);
+    assert.equal(party.status, 'cancelled');
+    assert.ok(party.endedAt);
+
+    const join = await post(app, member.authorization, `/events/${partyId}/join`);
+    assert.equal(join.json().code, 'EVENT_CLOSED');
+    const again = await post(app, leader.authorization, `/events/${partyId}/cancel`);
+    assert.equal(again.json().code, 'EVENT_NOT_CANCELLABLE');
+
+    // Once someone has checked in, the leader ends the event instead.
+    const started = await startedEvent(app, pool, leader.authorization, questId);
+    const checkIn = await post(app, leader.authorization, `/parties/${started}/check-in`, { location: spot });
+    assert.equal(checkIn.statusCode, 200);
+    const tooLate = await post(app, leader.authorization, `/events/${started}/cancel`);
+    assert.equal(tooLate.statusCode, 409);
+    assert.equal(tooLate.json().code, 'EVENT_NOT_CANCELLABLE');
+  });
+
+  test('an event under way can still end after a walk-up completes its quest', async (t) => {
+    const { app, storage } = await startApp(t);
+    const organizer = await signUp(app);
+    const walker = await signUp(app);
+    const spot = randomSpot();
+    const questId = await createQuest(app, storage, organizer.authorization, spot);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const eventId = await startedEvent(app, pool, organizer.authorization, questId);
+    const checkIn = await post(app, organizer.authorization, `/parties/${eventId}/check-in`, { location: spot });
+    assert.equal(checkIn.statusCode, 200);
+    await setPings(pool, eventId, organizer.userId, spot, [
+      { minutesAgo: 6, onSite: true },
+      { minutesAgo: 1, onSite: true },
+    ]);
+
+    const walk = await walkUp(app, walker.authorization, questId, spot);
+    assert.equal(walk.statusCode, 200);
+    const completed = await post(app, walker.authorization, `/parties/${walk.json().id}/end`, {
+      afterPhotoFileId: await uploadPhoto(app, storage, walker.authorization),
+      bagCount: 2,
+      outcome: 'completed',
+    });
+    assert.equal(completed.statusCode, 200);
+
+    const ended = await post(app, organizer.authorization, `/parties/${eventId}/end`, {
+      afterPhotoFileId: await uploadPhoto(app, storage, organizer.authorization),
+      bagCount: 1,
+      outcome: 'completed',
+    });
+    assert.equal(ended.statusCode, 200);
+    assert.equal(ended.json().status, 'completed');
+
+    const events = await pool.query<{ kind: string; party_id: string; xp: number | null }>(
+      `SELECT kind, party_id, xp FROM activity_event
+       WHERE quest_id = $1 AND kind IN ('quest_completed', 'party_xp_awarded')`,
+      [questId],
+    );
+    const completions = events.rows.filter((row) => row.kind === 'quest_completed');
+    assert.equal(completions.length, 1);
+    assert.equal(completions[0]!.party_id, walk.json().id);
+    const organizerXp = events.rows.find((row) => row.kind === 'party_xp_awarded' && row.party_id === eventId);
+    assert.ok(organizerXp && organizerXp.xp! > 0);
+  });
+
+  test('leaving a party that has not started is refused', async (t) => {
+    const { app, storage } = await startApp(t);
+    const leader = await signUp(app);
+    const spot = randomSpot();
+    const questId = await createQuest(app, storage, leader.authorization, spot);
+    const { partyId } = await createScheduledParty(app, leader.authorization, questId);
+
+    const leave = await post(app, leader.authorization, `/parties/${partyId}/leave`);
+    assert.equal(leave.statusCode, 409);
+    assert.equal(leave.json().code, 'PARTY_NOT_ACTIVE');
+  });
+
+  test('everyone who checked in sees their reward once, and members who never checked in see none', async (t) => {
+    const { app, storage } = await startApp(t);
+    const leader = await signUp(app);
+    const stayer = await signUp(app);
+    const leaver = await signUp(app);
+    const noShow = await signUp(app);
+    const spot = randomSpot();
+    const questId = await createQuest(app, storage, leader.authorization, spot);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const partyId = await startedEvent(app, pool, leader.authorization, questId);
+    for (const user of [stayer, leaver, noShow]) {
+      assert.equal((await post(app, user.authorization, `/events/${partyId}/join`)).statusCode, 200);
+    }
+    for (const user of [leader, stayer, leaver]) {
+      const response = await post(app, user.authorization, `/parties/${partyId}/check-in`, { location: spot });
+      assert.equal(response.statusCode, 200);
+    }
+    for (const user of [leader, stayer, leaver]) {
+      await setPings(pool, partyId, user.userId, spot, [
+        { minutesAgo: 5, onSite: true },
+        { minutesAgo: 0, onSite: true },
+      ]);
+    }
+    assert.equal((await post(app, leaver.authorization, `/parties/${partyId}/leave`)).statusCode, 200);
+
+    const rewards = async (user: { authorization: string }) => {
+      const response = await app.inject({ method: 'GET', url: '/me/rewards', headers: { authorization: user.authorization } });
+      assert.equal(response.statusCode, 200);
+      return response.json() as { pending: boolean; rewards: Array<{ partyId: string; xp: number; baseXp: number; bonusXp: number; outcome: string; minutesOnSite: number; bagCount: number; questTitle: string; walkUp: boolean }> };
+    };
+
+    // Nothing to show while the party is under way, though the member who left is still waiting on it.
+    assert.deepEqual(await rewards(stayer), { pending: true, rewards: [] });
+    assert.deepEqual(await rewards(leaver), { pending: true, rewards: [] });
+    assert.deepEqual(await rewards(noShow), { pending: false, rewards: [] });
+
+    const ended = await post(app, leader.authorization, `/parties/${partyId}/end`, {
+      afterPhotoFileId: await uploadPhoto(app, storage, leader.authorization),
+      bagCount: 3,
+      outcome: 'completed',
+    });
+    assert.equal(ended.statusCode, 200);
+
+    // A member's card left open shows how the event went.
+    const card = await app.inject({ method: 'GET', url: `/events/${partyId}`, headers: { authorization: stayer.authorization } });
+    assert.equal(card.statusCode, 200);
+    assert.equal(card.json().status, 'completed');
+
+    const xpEvents = await pool.query<{ user_id: string; xp: number }>(
+      `SELECT user_id, sum(xp)::integer AS xp FROM activity_event
+       WHERE party_id = $1 AND kind IN ('party_xp_awarded', 'hotspot_bonus')
+       GROUP BY user_id`,
+      [partyId],
+    );
+    const awarded = new Map(xpEvents.rows.map((row) => [row.user_id, row.xp]));
+
+    for (const user of [leader, stayer, leaver]) {
+      const { pending, rewards: [reward, ...rest] } = await rewards(user);
+      assert.equal(pending, false);
+      assert.equal(rest.length, 0);
+      assert.equal(reward!.partyId, partyId);
+      assert.equal(reward!.outcome, 'completed');
+      assert.equal(reward!.questTitle, 'Test party cleanup');
+      assert.equal(reward!.walkUp, false);
+      assert.equal(reward!.bagCount, 3);
+      assert.equal(reward!.minutesOnSite, 5);
+      assert.equal(reward!.xp, reward!.baseXp + reward!.bonusXp);
+      assert.equal(reward!.xp, awarded.get(user.userId));
+      assert.ok(reward!.xp > 0);
+    }
+    assert.deepEqual(await rewards(noShow), { pending: false, rewards: [] });
+
+    // Seen once, then gone; marking it again does nothing.
+    for (let i = 0; i < 2; i++) {
+      assert.equal((await post(app, stayer.authorization, `/me/rewards/${partyId}/seen`)).statusCode, 204);
+    }
+    assert.deepEqual(await rewards(stayer), { pending: false, rewards: [] });
+    assert.equal((await rewards(leaver)).rewards.length, 1);
+  });
+
+  test('a reward cannot be marked seen before the party ends', async (t) => {
+    const { app, storage } = await startApp(t);
+    const user = await signUp(app);
+    const spot = randomSpot();
+    const questId = await createQuest(app, storage, user.authorization, spot);
+    const walk = await walkUp(app, user.authorization, questId, spot);
+    assert.equal(walk.statusCode, 200);
+    const partyId = walk.json().id as string;
+
+    assert.equal((await post(app, user.authorization, `/me/rewards/${partyId}/seen`)).statusCode, 204);
+    const ended = await post(app, user.authorization, `/parties/${partyId}/end`, {
+      afterPhotoFileId: await uploadPhoto(app, storage, user.authorization),
+      bagCount: 0,
+      outcome: 'partial',
+    });
+    assert.equal(ended.statusCode, 200);
+
+    const response = await app.inject({ method: 'GET', url: '/me/rewards', headers: { authorization: user.authorization } });
+    const [reward] = response.json().rewards;
+    assert.equal(reward.partyId, partyId);
+    assert.equal(reward.outcome, 'partial');
+    assert.equal(reward.walkUp, true);
+  });
+
+  test('checking in to an event leaves a walk-up, checking in to a walk-up leaves an event, and /me/party shows either', async (t) => {
+    const { app, storage } = await startApp(t);
+    const user = await signUp(app);
+    const organizer = await signUp(app);
+    const spotA = randomSpot();
+    const spotB = randomSpot();
+    const questA = await createQuest(app, storage, user.authorization, spotA);
+    const questB = await createQuest(app, storage, user.authorization, spotB);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const mine = async () =>
+      (await app.inject({ method: 'GET', url: '/me/party', headers: { authorization: user.authorization } })).json()
+        .party as { id: string } | null;
+
+    // An event on quest B, and a walk-up on quest A that someone else keeps going.
+    const eventId = await startedEvent(app, pool, organizer.authorization, questB);
+    assert.equal((await post(app, user.authorization, `/events/${eventId}/join`)).statusCode, 200);
+    const walk = await walkUp(app, user.authorization, questA, spotA);
+    assert.equal(walk.statusCode, 200);
+    assert.equal((await walkUp(app, organizer.authorization, questA, spotA)).statusCode, 200);
+    assert.equal((await mine())?.id, walk.json().id);
+
+    // A failed event check-in leaves the walk-up alone.
+    const away = await post(app, user.authorization, `/parties/${eventId}/check-in`, { location: spotA });
+    assert.equal(away.json().code, 'CHECK_IN_OUTSIDE_GEOFENCE');
+    assert.equal((await mine())?.id, walk.json().id);
+
+    assert.equal((await post(app, user.authorization, `/parties/${eventId}/check-in`, { location: spotB })).statusCode, 200);
+    assert.equal((await mine())?.id, eventId);
+    assert.equal(memberOf(await getParty(app, user.authorization, walk.json().id), user.userId)?.status, 'left');
+
+    // The event's detail tells the user where they stand.
+    const detail = await app.inject({ method: 'GET', url: `/events/${eventId}`, headers: { authorization: user.authorization } });
+    assert.equal(detail.json().myStatus, 'checked_in');
+
+    // Back to the walk-up, which leaves the event.
+    assert.equal((await walkUp(app, user.authorization, questA, spotA)).statusCode, 200);
+    assert.equal((await mine())?.id, walk.json().id);
+    const after = await app.inject({ method: 'GET', url: `/events/${eventId}`, headers: { authorization: user.authorization } });
+    assert.equal(after.json().myStatus, 'left');
+    assert.equal(after.json().joined, false);
+  });
+
+  test('an event past its end stays listed while someone is on site', async (t) => {
+    const { app, storage } = await startApp(t);
+    const leader = await signUp(app);
+    const spot = randomSpot();
+    const questId = await createQuest(app, storage, leader.authorization, spot);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const partyId = await startedEvent(app, pool, leader.authorization, questId);
+    assert.equal((await post(app, leader.authorization, `/parties/${partyId}/check-in`, { location: spot })).statusCode, 200);
+    await pool.query(
+      `UPDATE party
+       SET scheduled_start = now() - interval '2 hours', scheduled_end = now() - interval '1 minute'
+       WHERE id = $1`,
+      [partyId],
+    );
+
+    const listed = async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/events?latitude=${spot.latitude}&longitude=${spot.longitude}&radiusM=100`,
+        headers: { authorization: leader.authorization },
+      });
+      assert.equal(response.statusCode, 200);
+      return (response.json().events as Array<{ id: string }>).some((event) => event.id === partyId);
+    };
+
+    assert.equal(await listed(), true);
+    // Joining is closed, though.
+    const stranger = await signUp(app);
+    assert.equal((await post(app, stranger.authorization, `/events/${partyId}/join`)).json().code, 'EVENT_CLOSED');
+
+    // Once everyone has timed out it drops off the list.
+    await setPings(pool, partyId, leader.userId, spot, [{ minutesAgo: 31, onSite: true }]);
+    assert.equal(await listed(), false);
   });
 
 });

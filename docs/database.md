@@ -13,7 +13,7 @@ For the product side, see [mvp.md](mvp.md).
 | Service | `clean-pursuit` (id `sm60nzjanh`), DEV, us-east-1 |
 | Postgres | 18.6, with built-in `uuidv7()` |
 | Extensions | TimescaleDB 2.30, PostGIS 3.6, h3 + h3_postgis 4.2 (pulls in postgis_raster), citext |
-| Applied | `001_initial_schema.sql` to `008_leaderboard_index.sql` |
+| Applied | `001_initial_schema.sql` to `010_party_rewards.sql` |
 | Credentials | Connection string stored in Infisical, never in the repo |
 
 ## Conventions
@@ -94,7 +94,7 @@ erDiagram
 | `report` | One user's sighting: photo, description, location, an optional `place_name` (a readable name for the spot, shown instead of coordinates), `difficulty_tier`, and an optional trash volume range (`estimated_volume_min_gallons`, `estimated_volume_max_gallons`). `area_id` is generated from the location. `estimated_bag_count` is no longer written and will be dropped. |
 | `report_category` | Trash categories on a report, with `source` (`user` or `gemini`). |
 | `report_hazard` | Hazard flags on a report, with `source`. |
-| `photo_analysis` | Gemini's suggestions for one uploaded photo, keyed by `file_id`: whether it shows litter, a description, category and hazard codes, a trash volume range in gallons and `terrain`, plus the model, token counts and latency. |
+| `photo_analysis` | Gemini's suggestions for one uploaded photo, keyed by `file_id`: whether it shows litter, a quest title, a description, category and hazard codes, a trash volume range in gallons and `terrain`, plus the model, token counts and latency. |
 
 Gemini runs once per photo, before the report exists, and its result prefills the report form.
 The reporter confirms or edits the tags, and a tag on the report has `source = 'gemini'` when Gemini suggested it for that photo and the reporter kept it.
@@ -124,7 +124,7 @@ It is provisional until a party ends, when the leader can correct the tags.
 | --- | --- |
 | `quest` | The problem to clean up, created from one original report (`report_id` is unique). `created_by_user_id` is the person raising awareness, not an organizer. Status: `open`, `completed`, `cancelled`, `expired`. |
 | `party` | One attempt at a quest. `scheduled_start`/`scheduled_end` set means an event; both null means a walk-up on a bounty. Ends with `after_photo_file_id` and `bag_count`. |
-| `party_member` | A user in a party: sign-up, check-in, last on-site time, and how they left. |
+| `party_member` | A user in a party: sign-up, check-in, last on-site time, how they left, and when they saw their reward (`reward_seen_at`). |
 
 Party rules enforced in the database:
 
@@ -133,6 +133,8 @@ Party rules enforced in the database:
 - `scheduled` needs a schedule and no start; `active`, `partial` and `completed` need `started_at`.
 - `partial` and `completed` need an after photo and a bag count; any ended status needs `ended_at`.
 - A member who is `checked_in` or `left` has `checked_in_at`; a member who `left` has `left_at` and `left_reason` (`voluntary`, `geofence_timeout`, `party_ended`).
+- Only a member who checked in can have `reward_seen_at`.
+  The partial index `party_member_unseen_reward_idx` on `user_id`, for checked-in members whose reward is unseen, serves `GET /me/rewards`.
 
 Party statuses:
 
@@ -158,10 +160,28 @@ Rules that live in the API, not the database:
 
 - Check-in needs a signed-up member, a scheduled party inside its time slot, an open quest and a location within 100 m of the report.
   The first check-in sets the party `active` and `started_at`.
+  A member who `left` checks in again the same way as for a walk-up.
+- Walk-up check-in (`POST /quests/{id}/walk-up`) needs only an open quest and a location within 100 m.
+  It locks the quest row, so concurrent first check-ins start one walk-up, and either joins the active walk-up or inserts a new `active` party with the caller as leader and member.
+  A member who `left` checks in again by returning to `checked_in` with `left_at` and `left_reason` cleared, keeping `checked_in_at`.
+  Before joining, the caller leaves (`voluntary`) any other active party they are `checked_in` to, walk-up or event, with the usual handoff or abandoning, so time on site is never counted twice.
+  Event check-in does the same after its own checks pass.
+- A `checked_in` member of an `active` party (walk-up or event) whose `last_on_site_at` (or `checked_in_at`) is more than 30 minutes old becomes `left` with `geofence_timeout`, and `left_at` is their last on-site time.
+  The API applies this lazily, in its own transaction, before check-in, presence pings, leaving, ending and reading a party (`GET /parties/{id}`, `GET /events/{id}`, `GET /me/party`, `GET /me/rewards`), and quest and event responses ignore those members until then.
+- When an `active` party's leader is `left`, `leader_user_id` moves to the `checked_in` member with the earliest `checked_in_at`.
+  An organizer who is still `signed_up` stays the leader.
+  With nobody `checked_in`, a walk-up becomes `abandoned` with `ended_at` set to the last member's `left_at` (or `started_at`), and so does an event once its `scheduled_end` has passed.
+  Before then the event stays `active` with its leader, and the next check-in takes over.
 - `presence_ping.on_site` is computed with `ST_DWithin` against the quest's report location, within 100 m, and an on-site ping updates `party_member.last_on_site_at`.
-- Ending a party computes each member's time on site from `presence_ping`: the sum of the gaps between consecutive pings that were both on site, each gap at most 10 minutes, between check-in and the scheduled end.
+- Ending a party computes each member's time on site from `presence_ping`: the sum of the gaps between consecutive pings that were both on site, each gap at most 10 minutes, from check-in until the party ends or, for an event, its scheduled end if that is earlier.
 - Ending a party marks `signed_up` members `no_show` and `checked_in` members `left` with `party_ended`.
-- Not built yet: the first check-in on a walk-up becoming the leader, promoting the longest-present member when the leader leaves, and marking a member `left` with `geofence_timeout` after 30 minutes without an on-site ping.
+- Ending with `completed` sets the quest `completed` and its `scheduled` parties `cancelled`.
+- Calling off an event (`POST /events/{id}/cancel`) is for its leader while it is `scheduled`, and sets it `cancelled` with `ended_at`.
+- Ending accepts an `active` party whose quest is `open` or `completed`.
+  Only a `completed` outcome on an `open` quest completes the quest, logs `quest_completed` and cancels the quest's `scheduled` parties.
+- A member with `checked_in_at` in a `completed` or `partial` party has an unseen reward until `POST /me/rewards/{partyId}/seen` sets `reward_seen_at`.
+  The reward's XP comes from the party's `party_xp_awarded` and `hotspot_bonus` activity events.
+  Migration `010` marked the rewards of parties that had already ended as seen.
 
 ### Equipment lookup
 

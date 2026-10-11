@@ -19,7 +19,7 @@ export default function PartySizeStep({ value, onChange }: PartySizeStepProps) {
 
   return (
     <AppCard>
-      <StepHeading number={4} title="BUILD YOUR PARTY" />
+      <StepHeading number={4} title="Build your party" />
       <View style={styles.intro}>
         <View style={[styles.icon, { backgroundColor: theme.highlight }]}>
           <QuestIcon name="people" color={theme.text} size={28} />

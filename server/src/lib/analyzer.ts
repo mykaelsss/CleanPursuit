@@ -26,6 +26,8 @@ export interface AnalyzeInput {
 // What the model saw. Tag codes are always from the lists it was given.
 export interface Analysis {
   showsLitter: boolean;
+  // A suggested quest title; null when there is no litter or the model gave none.
+  title: string | null;
   description: string;
   categories: string[];
   hazards: string[];
@@ -64,10 +66,16 @@ const HAZARD_HINTS: Record<string, string> = {
 };
 
 const MAX_DESCRIPTION_LENGTH = 300;
+// Quest titles must be 3 to 80 characters; see POST /reports/{id}/quest.
+const MIN_TITLE_LENGTH = 3;
+const MAX_TITLE_LENGTH = 80;
 
 function outputSchema(categoryCodes: string[], hazardCodes: string[]) {
   return z.object({
     showsLitter: z.boolean().describe('True if the photo shows litter or dumped items that a cleanup could remove'),
+    title: z
+      .string()
+      .describe('A short quest title of 3 to 8 words naming the litter and the kind of place. Empty if there is no litter.'),
     description: z
       .string()
       .describe('One or two plain sentences saying what litter is where. No cleanup or handling instructions.'),
@@ -104,7 +112,10 @@ Rules:
 - Leave bulky items that will not fit in a bag out of the volume and flag bulky_items instead.
 - Write the description for other volunteers, for example "Plastic bottles and food wrappers along a fence by a parking lot."
   Never give cleanup, handling or disposal instructions.
-- If the photo shows no litter, set showsLitter to false, leave categories and hazards empty and set both gallon estimates to 0.`;
+- Write the title as a short call to action for the quest board, for example "Clear bottles from the parking lot fence".
+  Use sentence case and no ending punctuation.
+  Only name a place when its name is clearly visible, such as on a sign.
+- If the photo shows no litter, set showsLitter to false, leave the title, categories and hazards empty and set both gallon estimates to 0.`;
 }
 
 export interface GeminiOptions {
@@ -157,9 +168,11 @@ export function createGeminiAnalyzer({ apiKey, model }: GeminiOptions): PhotoAna
       const usage = response.usageMetadata;
       const low = Math.min(Math.max(parsed.minGallons, 0), MAX_VOLUME_GALLONS);
       const high = Math.min(Math.max(parsed.maxGallons, 0), MAX_VOLUME_GALLONS);
+      const title = parsed.title.trim().slice(0, MAX_TITLE_LENGTH).trim();
       return {
         analysis: {
           showsLitter: parsed.showsLitter,
+          title: parsed.showsLitter && title.length >= MIN_TITLE_LENGTH ? title : null,
           description: parsed.description.trim().slice(0, MAX_DESCRIPTION_LENGTH),
           categories: [...new Set(parsed.categories)].sort(),
           hazards: [...new Set(parsed.hazards)].sort(),

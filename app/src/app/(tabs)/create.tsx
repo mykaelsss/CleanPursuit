@@ -1,12 +1,12 @@
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 import AppCard from '@/components/app-card';
-import { FormButton } from '@/components/create-quest/form-controls';
+import { ConfirmCheck, FormButton } from '@/components/create-quest/form-controls';
 import LocationStep, { type LocationDraft } from '@/components/create-quest/location-step';
-import PhotoStep from '@/components/create-quest/photo-step';
+import PhotoStep, { type PhotoSource, type PhotoStatus } from '@/components/create-quest/photo-step';
 import QuestDetailsStep from '@/components/create-quest/quest-details-step';
 import { CreateQuestButton, CreateQuestHero, QuestReadiness, QuestReward } from '@/components/create-quest/quest-status';
 import QuestSummary from '@/components/create-quest/quest-summary';
@@ -18,12 +18,13 @@ import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, type Hazard, type PhotoAnalysis, type Quest, type ReportTags } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { parseLocation, parseVolume, saveQuest, type CreationProgress } from '@/lib/create-quest';
+import { parseLocation, parseVolume, photoPoint, saveQuest, type CreationProgress } from '@/lib/create-quest';
 import { uploadReportPhoto, type PhotoProgress } from '@/lib/report-photo';
+import { currentPoint, formatCoordinate, placeNameFor } from '@/lib/spot-location';
 
 const emptyLocation: LocationDraft = { latitude: '', longitude: '', placeName: '' };
 
-type PhotoFields = 'description' | 'categories' | 'hazards' | 'volume';
+type PhotoFields = 'title' | 'description' | 'categories' | 'hazards' | 'volume';
 
 export default function CreateQuestScreen() {
   const { authedRequest } = useAuth();
@@ -32,7 +33,7 @@ export default function CreateQuestScreen() {
   const [tagsError, setTagsError] = useState(false);
   const [photo, setPhoto] = useState<ImagePickerAsset | null>(null);
   const [fileId, setFileId] = useState<string | null>(null);
-  const [photoStatus, setPhotoStatus] = useState<'idle' | 'uploading' | 'analyzing' | 'ready' | 'error'>('idle');
+  const [photoStatus, setPhotoStatus] = useState<PhotoStatus>('idle');
   const [photoMessage, setPhotoMessage] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -43,6 +44,7 @@ export default function CreateQuestScreen() {
   const [location, setLocation] = useState(emptyLocation);
   const [locationConfirmed, setLocationConfirmed] = useState(false);
   const [locationBusy, setLocationBusy] = useState(false);
+  const [locationNote, setLocationNote] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [scheduleParty, setScheduleParty] = useState(true);
   const [schedule, setSchedule] = useState(createInitialSchedule);
@@ -57,10 +59,18 @@ export default function CreateQuestScreen() {
   const photoVersion = useRef(0);
   const skippedAnalysis = useRef<number | null>(null);
   const dirty = useRef(new Set<PhotoFields>());
+  // Set once the reporter edits or looks up the location, so the photo no longer fills it in.
+  const locationTouched = useRef(false);
   const submitting = useRef(false);
 
+  // The analysis callback reads tags from here, because its closure can predate the tags loading.
+  const loadedTags = useRef<ReportTags | null>(null);
+
   const loadTags = useCallback(async () => {
-    await authedRequest<ReportTags>('/tags').then(setTags).catch(() => setTagsError(true));
+    await authedRequest<ReportTags>('/tags').then((loaded) => {
+      loadedTags.current = loaded;
+      setTags(loaded);
+    }).catch(() => setTagsError(true));
   }, [authedRequest]);
   useEffect(() => { void loadTags(); }, [loadTags]);
   useEffect(() => () => { photoVersion.current++; }, []);
@@ -78,20 +88,21 @@ export default function CreateQuestScreen() {
       if (version !== photoVersion.current) return;
       setFileId(id);
       setPhotoStatus('analyzing');
-      setPhotoMessage('Looking for litter, categories, hazards and a trash amount. You can fill in the details while you wait.');
+      setPhotoMessage('Suggesting a title, description, categories, hazards and a trash amount. You can fill in the details while you wait.');
       try {
         const analysis = await authedRequest<PhotoAnalysis>(`/files/${id}/analysis`, { method: 'POST' });
         if (version !== photoVersion.current || skippedAnalysis.current === version) return;
+        if (!dirty.current.has('title') && analysis.title) setTitle(analysis.title);
         if (!dirty.current.has('description')) setDescription(analysis.description);
         if (!dirty.current.has('categories')) setSelectedTags(analysis.categories);
-        if (!dirty.current.has('hazards')) setPendingHazards(analysis.hazards);
+        if (!dirty.current.has('hazards')) suggestHazards(analysis.hazards);
         if (!dirty.current.has('volume')) setVolume({
           low: analysis.estimatedVolume ? String(analysis.estimatedVolume.minGallons) : '',
           high: analysis.estimatedVolume ? String(analysis.estimatedVolume.maxGallons) : '',
         });
         setConfirmed(false);
         setPhotoMessage(analysis.showsLitter
-          ? 'Suggestions are ready. Review the description, categories, hazards and amount before confirming.'
+          ? 'Suggestions are ready. Review the title, description, categories, hazards and amount before confirming.'
           : 'AI did not see litter in this photo. Check it and describe what needs cleaning. You can still continue.');
       } catch {
         if (version !== photoVersion.current || skippedAnalysis.current === version) return;
@@ -105,7 +116,34 @@ export default function CreateQuestScreen() {
     }
   };
 
-  const changePhoto = (next: ImagePickerAsset | null) => {
+  // Only drop-off hazards (sharps, biohazard) wait for the Yes/No warning. Other suggestions are added
+  // straight away and codes the API does not know are dropped. Before tags load, all of them wait.
+  const suggestHazards = (codes: string[]) => {
+    const known = loadedTags.current ? new Map(loadedTags.current.hazards.map((hazard) => [hazard.code, hazard])) : null;
+    if (!known) return setPendingHazards(codes);
+    setSelectedHazards(codes.filter((code) => known.has(code) && !known.get(code)!.requiresDropoff));
+    setPendingHazards(codes.filter((code) => known.get(code)?.requiresDropoff));
+  };
+
+  // Fills in the spot from the photo's GPS tags, or from the phone for a photo just taken on it.
+  // A library photo without GPS may be from elsewhere, so it leaves the location empty.
+  const fillLocation = async (asset: ImagePickerAsset, source: PhotoSource | undefined, version: number) => {
+    const stale = () => version !== photoVersion.current || locationTouched.current;
+    let point = photoPoint(asset);
+    let note = 'Filled in from where the photo was taken. Check that it marks the cleanup spot, then confirm.';
+    if (!point && source === 'camera' && Platform.OS !== 'web') {
+      point = await currentPoint().catch(() => null);
+      note = 'Filled in from your current location. Check that it marks the cleanup spot, then confirm.';
+    }
+    if (!point || stale()) return;
+    const placeName = await placeNameFor(point);
+    if (stale()) return;
+    setLocation({ latitude: formatCoordinate(point.latitude), longitude: formatCoordinate(point.longitude), placeName });
+    setLocationConfirmed(false);
+    setLocationNote(note);
+  };
+
+  const changePhoto = (next: ImagePickerAsset | null, source?: PhotoSource) => {
     const version = ++photoVersion.current;
     const upload: PhotoProgress = {};
     photoProgress.current = upload;
@@ -116,17 +154,29 @@ export default function CreateQuestScreen() {
     setPendingHazards([]);
     setPhotoMessage(null);
     setPhotoStatus('idle');
+    if (!dirty.current.has('title')) setTitle('');
     if (!dirty.current.has('description')) setDescription('');
     if (!dirty.current.has('categories')) setSelectedTags([]);
     if (!dirty.current.has('hazards')) setSelectedHazards([]);
     if (!dirty.current.has('volume')) setVolume({ low: '', high: '' });
-    if (next) void preparePhoto(next, version, upload);
+    if (!locationTouched.current) {
+      setLocation(emptyLocation);
+      setLocationConfirmed(false);
+      setLocationNote(null);
+    }
+    if (next) {
+      void preparePhoto(next, version, upload);
+      void fillLocation(next, source, version);
+    }
   };
 
   const toggleHazard = (code: string) => {
     edit('hazards');
     if (selectedHazards.includes(code)) {
       setSelectedHazards((current) => current.filter((item) => item !== code));
+    } else if (!tags?.hazards.find((hazard) => hazard.code === code)?.requiresDropoff) {
+      setConfirmed(false);
+      setSelectedHazards((current) => [...new Set([...current, code])]);
     } else {
       setPendingHazards((current) => [...new Set([...current, code])]);
     }
@@ -139,6 +189,12 @@ export default function CreateQuestScreen() {
     setPendingHazards((current) => current.slice(1));
   };
 
+  const skipAnalysis = () => {
+    skippedAnalysis.current = photoVersion.current;
+    setPhotoStatus('ready');
+    setPhotoMessage('Photo uploaded. Fill in and confirm the report yourself.');
+  };
+
   const point = parseLocation(location.latitude, location.longitude);
   const amount = parseVolume(volume.low, volume.high);
   const detailsValid = title.trim().length >= 3 && description.trim().length > 0 &&
@@ -146,9 +202,37 @@ export default function CreateQuestScreen() {
     selectedTags.every((code) => tags.categories.some((tag) => tag.code === code)) &&
     selectedHazards.every((code) => tags.hazards.some((tag) => tag.code === code));
   const photoReady = !!fileId && photoStatus === 'ready';
-  const completedSteps = [photoReady, detailsValid && confirmed && pendingHazards.length === 0,
-    !!point && !!location.placeName.trim() && locationConfirmed && !locationBusy, !scheduleParty || isValidSchedule(schedule)].filter(Boolean).length;
+  const locationValid = !!point && !!location.placeName.trim() && !locationBusy;
+  const steps = [
+    photoReady,
+    detailsValid && confirmed && pendingHazards.length === 0,
+    locationValid && locationConfirmed,
+    !scheduleParty || isValidSchedule(schedule),
+  ];
+  const completedSteps = steps.filter(Boolean).length;
   const ready = completedSteps === 4;
+
+  // Why the details confirmation is disabled, checked in the order the form is filled in.
+  const detailsHint = !photo ? 'Add a before photo first.'
+    : photoStatus === 'error' ? 'Retry the photo upload first.'
+    : photoStatus === 'analyzing' ? 'Waiting for AI suggestions. You can also continue without them.'
+    : !photoReady ? 'Waiting for the photo to upload.'
+    : title.trim().length < 3 ? 'Add a quest title of at least 3 characters.'
+    : !description.trim() ? 'Describe the litter and the spot.'
+    : selectedTags.length === 0 ? 'Pick at least one trash category.'
+    : amount === null ? 'Fix the trash amount, or leave both fields blank.'
+    : pendingHazards.length > 0 ? 'Answer the safety warning first.'
+    : null;
+  const locationHint = locationBusy ? null
+    : !point ? 'Add valid coordinates first.'
+    : !location.placeName.trim() ? 'Add a place name or address.'
+    : null;
+  const nextStepHint = saved && !steps[3] ? 'Fix the party time, or turn off scheduling.'
+    : !steps[0] ? 'Next: add a before photo.'
+    : !steps[1] ? 'Next: finish and confirm the quest details.'
+    : !steps[2] ? 'Next: pin the spot and confirm it.'
+    : !steps[3] ? 'Next: fix the party time, or turn off scheduling.'
+    : null;
 
   const createQuest = async () => {
     if (submitting.current || !ready || !fileId || !point) return;
@@ -191,11 +275,12 @@ export default function CreateQuestScreen() {
   };
 
   const reset = () => {
-    changePhoto(null);
     dirty.current.clear();
+    locationTouched.current = false;
+    changePhoto(null);
     progress.current = {};
     setTitle(''); setDescription(''); setSelectedTags([]); setSelectedHazards([]);
-    setVolume({ low: '', high: '' }); setLocation(emptyLocation); setLocationConfirmed(false);
+    setVolume({ low: '', high: '' }); setLocation(emptyLocation); setLocationConfirmed(false); setConfirmed(false);
     setSchedule(createInitialSchedule()); setScheduleParty(true); setSaved(false);
     setReportedHazards([]);
     setError(null); setDuplicateReview(null); setResult(null);
@@ -207,7 +292,7 @@ export default function CreateQuestScreen() {
       <QuestSummary quest={result.quest} reportedHazards={reportedHazards} />
       <ThemedText>{result.eventId ? 'Your party is scheduled. You are its organizer and first attendee.'
         : 'You have raised awareness of this spot. Creating a quest does not sign you up for a party.'}</ThemedText>
-      <FormButton label="Browse cleanup parties" onPress={() => router.navigate('/events')} />
+      <FormButton label="Open the quests map" onPress={() => router.navigate('/events')} />
       <FormButton label="Create another quest" onPress={reset} />
     </ScreenLayout>
   );
@@ -219,33 +304,32 @@ export default function CreateQuestScreen() {
         <QuestReadiness completedSteps={completedSteps} />
         {saved ? <ThemedText type="small">Your report is saved. Its details are locked while you finish creating the quest or scheduling a party.</ThemedText> : null}
         {!saved ? <View pointerEvents={busy ? 'none' : 'auto'} style={styles.section} aria-hidden={busy}>
-          <PhotoStep photo={photo} onPhotoChange={changePhoto} />
-          {photoMessage ? <ThemedText type="small" accessibilityLiveRegion="polite">{photoMessage}</ThemedText> : null}
-          {photoStatus === 'uploading' || photoStatus === 'analyzing' ? <ActivityIndicator color={theme.tint} /> : null}
-          {photoStatus === 'error' && photo ? <FormButton label="Retry photo upload"
-            onPress={() => void preparePhoto(photo, photoVersion.current, photoProgress.current)} /> : null}
-          {photoStatus === 'analyzing' ? <FormButton label="Continue without AI suggestions" onPress={() => {
-            skippedAnalysis.current = photoVersion.current;
-            setPhotoStatus('ready');
-            setPhotoMessage('Photo uploaded. Fill in and confirm the report yourself.');
-          }} /> : null}
-          {tags ? <QuestDetailsStep title={title} description={description} tags={tags}
+          <PhotoStep photo={photo} status={photoStatus} message={photoMessage} onPhotoChange={changePhoto}
+            onRetry={() => { if (photo) void preparePhoto(photo, photoVersion.current, photoProgress.current); }}
+            onSkipAnalysis={skipAnalysis} />
+          {tags ? <QuestDetailsStep title={title} description={description} tags={tags} done={steps[1]}
             volumeLow={volume.low} volumeHigh={volume.high} selectedTags={selectedTags} selectedSafetyFlags={selectedHazards}
-            onTitleChange={(value) => { setTitle(value); setConfirmed(false); }}
+            onTitleChange={(value) => { edit('title'); setTitle(value); }}
             onDescriptionChange={(value) => { edit('description'); setDescription(value); }}
             onVolumeChange={(low, high) => { edit('volume'); setVolume({ low, high }); }}
             onTagPress={(code) => { edit('categories'); setSelectedTags((current) =>
               current.includes(code) ? current.filter((item) => item !== code) : [...current, code]); }}
-            onSafetyFlagPress={toggleHazard} /> : tagsError ? (
+            onSafetyFlagPress={toggleHazard}>
+            <ConfirmCheck label="I reviewed the description, trash categories, hazards and amount." checked={confirmed}
+              disabled={!photoReady || !detailsValid || pendingHazards.length > 0} hint={detailsHint}
+              onPress={() => setConfirmed(!confirmed)} />
+          </QuestDetailsStep> : tagsError ? (
               <AppCard><ThemedText>Could not load report categories and hazards.</ThemedText>
                 <FormButton label="Retry loading categories" onPress={() => { setTagsError(false); void loadTags(); }} /></AppCard>
             ) : <ActivityIndicator color={theme.tint} />}
-          <Check label="I reviewed the description, trash categories, hazards and amount." checked={confirmed}
-            disabled={!photoReady || !detailsValid || pendingHazards.length > 0} onPress={() => setConfirmed(!confirmed)} />
-          <LocationStep value={location} onBusyChange={setLocationBusy}
-            onChange={(value) => { setLocation(value); setLocationConfirmed(false); }} />
-          <Check label="I confirm these coordinates mark the cleanup spot." checked={locationConfirmed}
-            disabled={!point || !location.placeName.trim() || locationBusy} onPress={() => setLocationConfirmed(!locationConfirmed)} />
+          <LocationStep value={location} onBusyChange={setLocationBusy} done={steps[2]} note={locationNote}
+            onChange={(value) => {
+              locationTouched.current = true;
+              setLocation(value); setLocationConfirmed(false); setLocationNote(null);
+            }}>
+            <ConfirmCheck label="These coordinates mark the cleanup spot." checked={locationConfirmed}
+              disabled={!locationValid} hint={locationHint} onPress={() => setLocationConfirmed(!locationConfirmed)} />
+          </LocationStep>
         </View> : null}
         {duplicateReview ? <AppCard>
           <ThemedText type="smallBold">This spot already has a report</ThemedText>
@@ -256,23 +340,12 @@ export default function CreateQuestScreen() {
           })} />
         </AppCard> : null}
         <View pointerEvents={busy ? 'none' : 'auto'} style={styles.section}>
-          <AppCard>
-            <View style={styles.toggleRow}>
-              <ThemedText type="smallBold" style={styles.toggleLabel}>Organize a scheduled party</ThemedText>
-              <Switch accessibilityLabel="Organize a scheduled party" value={scheduleParty} onValueChange={setScheduleParty} disabled={busy} />
-            </View>
-            <ThemedText type="small" themeColor="textSecondary">{scheduleParty
-              ? 'You will be the party leader and first attendee. Only the leader can end the party.'
-              : 'Create the quest to raise awareness. You can choose a cleanup party later.'}</ThemedText>
-          </AppCard>
-          {scheduleParty ? <ScheduleStep value={schedule} onChange={setSchedule} /> : null}
-          {scheduleParty && !isValidSchedule(schedule) ? <ThemedText type="small" themeColor="error">
-            Choose a future start and an end after it, at most 12 hours later.
-          </ThemedText> : null}
+          <ScheduleStep enabled={scheduleParty} onEnabledChange={setScheduleParty} disabled={busy} done={steps[3]}
+            value={schedule} onChange={setSchedule} />
         </View>
         <QuestReward />
         {error ? <ThemedText themeColor="error" accessibilityRole="alert">{error}</ThemedText> : null}
-        <CreateQuestButton ready={ready} busy={busy}
+        <CreateQuestButton ready={ready} busy={busy} hint={nextStepHint}
           label={busy ? 'Saving...' : duplicateReview && scheduleParty ? 'Schedule party on this quest' : saved ? 'Finish creating quest' : 'Create quest'}
           onPress={() => void createQuest()} />
       </ScreenLayout>
@@ -282,21 +355,6 @@ export default function CreateQuestScreen() {
   );
 }
 
-function Check({ label, checked, disabled, onPress }: {
-  label: string; checked: boolean; disabled: boolean; onPress: () => void;
-}) {
-  const theme = useTheme();
-  return <Pressable accessibilityRole="checkbox" accessibilityState={{ checked, disabled }}
-    aria-checked={checked} aria-disabled={disabled}
-    disabled={disabled} onPress={onPress} style={[styles.check, { borderColor: checked ? theme.tint : theme.border }, disabled && styles.disabled]}>
-    <ThemedText type="smallBold">{checked ? '☑' : '☐'} {label}</ThemedText>
-  </Pressable>;
-}
-
 const styles = StyleSheet.create({
   section: { gap: 16 },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  toggleLabel: { flex: 1 },
-  check: { minHeight: 48, borderWidth: 1, borderRadius: 14, padding: 14, justifyContent: 'center' },
-  disabled: { opacity: 0.5 },
 });

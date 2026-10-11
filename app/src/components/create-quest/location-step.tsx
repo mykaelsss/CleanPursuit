@@ -1,5 +1,5 @@
 import * as Location from 'expo-location';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import AppCard from '@/components/app-card';
@@ -7,11 +7,17 @@ import { FormButton, FormField } from '@/components/create-quest/form-controls';
 import StepHeading from '@/components/create-quest/step-heading';
 import { ThemedText } from '@/components/themed-text';
 import { parseLocation } from '@/lib/create-quest';
+import { currentPoint, formatCoordinate, placeNameFor } from '@/lib/spot-location';
 
 export type LocationDraft = { latitude: string; longitude: string; placeName: string };
 
-export default function LocationStep({ value, onChange, onBusyChange }: {
+export default function LocationStep({ value, onChange, onBusyChange, done, note, children }: {
   value: LocationDraft; onChange: (value: LocationDraft) => void; onBusyChange: (busy: boolean) => void;
+  done: boolean;
+  // Says where an autofilled location came from, until the reporter looks up the spot themselves.
+  note?: string | null;
+  // The confirmation, shown at the end of the card.
+  children?: ReactNode;
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -36,23 +42,20 @@ export default function LocationStep({ value, onChange, onBusyChange }: {
       if (Platform.OS === 'web' && address) {
         throw new Error('Address lookup is available on phones. Use your location or enter coordinates here.');
       }
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (!permission.granted) {
-        throw new Error('Location access was denied. You can enter the spot coordinates instead.');
+      if (address) {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (!permission.granted) {
+          throw new Error('Location access was denied. You can enter the spot coordinates instead.');
+        }
       }
-      const point = address
-        ? (await Location.geocodeAsync(value.placeName.trim()))[0]
-        : (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })).coords;
+      const point = address ? (await Location.geocodeAsync(value.placeName.trim()))[0] : await currentPoint();
       if (!point) throw new Error('No matching address found. Add a street and city, or enter coordinates.');
       if (id !== operation.current) return;
-      const next = { ...value, latitude: point.latitude.toFixed(6), longitude: point.longitude.toFixed(6) };
-      if (!address && Platform.OS !== 'web') {
-        const result = await Location.reverseGeocodeAsync(point).catch(() => []);
+      const next = { ...value, latitude: formatCoordinate(point.latitude), longitude: formatCoordinate(point.longitude) };
+      if (!address && !next.placeName) {
+        const name = await placeNameFor(point);
         if (id !== operation.current) return;
-        const place = result[0];
-        const name = place ? [place.name ?? place.street, place.district ?? place.city]
-          .filter(Boolean).join(', ').slice(0, 120) : '';
-        next.placeName ||= name;
+        next.placeName = name;
       }
       if (id !== operation.current) return;
       onChange(next);
@@ -66,7 +69,7 @@ export default function LocationStep({ value, onChange, onBusyChange }: {
 
   return (
     <AppCard>
-      <StepHeading number={3} title="PIN THE SPOT" />
+      <StepHeading number={3} title="Pin the spot" done={done} />
       <ThemedText type="small" themeColor="textSecondary">
         Use your current location only when you are at the spot. Volunteers check in within 100 m of this point.
       </ThemedText>
@@ -83,10 +86,15 @@ export default function LocationStep({ value, onChange, onBusyChange }: {
         <View style={styles.coordinate}><FormField label="Longitude" value={value.longitude} keyboardType="numbers-and-punctuation"
           placeholder="-73.981" onChangeText={(longitude) => update({ ...value, longitude })} /></View>
       </View>
-      {!parseLocation(value.latitude, value.longitude) ? (
-        <ThemedText type="small" themeColor="textSecondary">Enter valid latitude (-90 to 90) and longitude (-180 to 180).</ThemedText>
+      {!value.latitude.trim() && !value.longitude.trim() ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          {Platform.OS === 'web' ? 'Use your location or enter the coordinates.' : 'Use your location, find the address or enter the coordinates.'}
+        </ThemedText>
+      ) : !parseLocation(value.latitude, value.longitude) ? (
+        <ThemedText type="small" themeColor="error">Enter a latitude from -90 to 90 and a longitude from -180 to 180.</ThemedText>
       ) : null}
-      {message ? <ThemedText type="small" accessibilityLiveRegion="polite">{message}</ThemedText> : null}
+      {message || note ? <ThemedText type="small" accessibilityLiveRegion="polite">{message ?? note}</ThemedText> : null}
+      {children}
     </AppCard>
   );
 }

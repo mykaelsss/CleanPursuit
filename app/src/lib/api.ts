@@ -65,6 +65,8 @@ export type VolumeEstimate = VolumeRange & {
 export interface PhotoAnalysis {
   fileId: string;
   showsLitter: boolean;
+  // A suggested quest title; null when there is no litter.
+  title: string | null;
   description: string;
   categories: string[];
   hazards: string[];
@@ -97,6 +99,63 @@ export interface Quest {
   title: string;
   status: 'open' | 'completed' | 'cancelled' | 'expired';
   report: LitterReport;
+  // The most XP one member can earn in a party on this quest, set by its difficulty tier.
+  maxXp: number;
+  // The walk-up cleanup under way, or null. Anyone at the spot can check in to join or start one.
+  walkUp: WalkUp | null;
+}
+
+// A quest's walk-up cleanup under way: a party with no schedule that anyone at the spot can join.
+export interface WalkUp {
+  partyId: string;
+  leader: { id: string; username: string };
+  startedAt: string;
+  // Members on site now.
+  checkedInCount: number;
+}
+
+export interface PartyMember {
+  userId: string;
+  username: string;
+  status: 'signed_up' | 'checked_in' | 'left' | 'no_show';
+  signedUpAt: string;
+  checkedInAt: string | null;
+  leftAt: string | null;
+}
+
+// One attempt at a quest, from the /parties routes. A walk-up has no schedule.
+export interface Party {
+  id: string;
+  questId: string;
+  leader: { id: string; username: string };
+  status: 'scheduled' | 'active' | 'partial' | 'completed' | 'abandoned' | 'cancelled';
+  scheduledStart: string | null;
+  scheduledEnd: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  bagCount: number | null;
+  afterPhotoFileId: string | null;
+  members: PartyMember[];
+  createdAt: string;
+}
+
+// XP earned from a party that ended with an after photo, from GET /me/rewards. Shown once to everyone who
+// checked in, then marked seen.
+export interface Reward {
+  partyId: string;
+  questId: string;
+  questTitle: string;
+  // `completed` when the party finished the quest.
+  outcome: 'completed' | 'partial';
+  walkUp: boolean;
+  leader: { id: string; username: string };
+  endedAt: string;
+  bagCount: number;
+  minutesOnSite: number;
+  baseXp: number;
+  // The hotspot bonus.
+  bonusXp: number;
+  xp: number;
 }
 
 export type AuthedRequest = <T>(path: string, options?: { method?: string; body?: unknown }) => Promise<T>;
@@ -113,7 +172,8 @@ export interface CleanupEvent {
   // The report's H3 area, to match against hotspots.
   areaId: string;
   difficultyTier: DifficultyTier;
-  status: 'scheduled' | 'active';
+  // `active` once someone has checked in. Only GET /events/{id} returns events that have ended.
+  status: Party['status'];
   scheduledStart: string;
   scheduledEnd: string;
   organizer: { id: string; username: string };
@@ -121,7 +181,11 @@ export interface CleanupEvent {
   photo: { id: string; url: string };
   attendeeCount: number;
   joined: boolean;
+  // The signed-in user's membership. `left` members can check in again until the scheduled end.
+  myStatus: PartyMember['status'] | null;
   isOrganizer: boolean;
+  // A walk-up cleanup under way on the event's quest, which anyone at the spot can join now.
+  walkUp: WalkUp | null;
 }
 
 export type NearbyEvent = CleanupEvent & { distanceM: number };
@@ -139,6 +203,8 @@ export interface NearbyQuest {
   // Hazard codes, such as `sharps`.
   hazards: string[];
   photo: { id: string; url: string };
+  maxXp: number;
+  walkUp: WalkUp | null;
   createdAt: string;
 }
 

@@ -49,6 +49,24 @@ export function XpBadge({ maxXp }: { maxXp: number }) {
   );
 }
 
+export function onSiteText(count: number) {
+  return `${count} on site`;
+}
+
+// A walk-up cleanup under way on a quest: people are at the spot now, and anyone there can join.
+export function LiveBadge({ count }: { count: number }) {
+  const theme = useTheme();
+  return (
+    <View
+      style={[styles.badge, { backgroundColor: theme.tint }]}
+      accessible
+      accessibilityLabel={`Live now, ${count} ${count === 1 ? 'person' : 'people'} on site`}>
+      <View style={[styles.liveDot, { backgroundColor: theme.onTint }]} />
+      <ThemedText style={[styles.badgeText, { color: theme.onTint }]}>Live, {onSiteText(count)}</ThemedText>
+    </View>
+  );
+}
+
 // A round avatar with the member's first initial. The color comes from the username, so it stays put.
 export function Avatar({ username, size = 40 }: { username: string; size?: number }) {
   let hash = 0;
@@ -103,6 +121,11 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     borderWidth: 1.5,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   avatar: {
     alignItems: 'center',

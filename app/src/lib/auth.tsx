@@ -13,6 +13,8 @@ interface AuthContextValue {
   signOut: () => Promise<void>;
   // Calls a protected route, refreshing the access token once if it has expired.
   authedRequest: <T>(path: string, options?: { method?: string; body?: unknown }) => Promise<T>;
+  // Reloads the signed-in user, such as after earning XP.
+  reloadUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -119,8 +121,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [refresh],
   );
 
+  const reloadUser = useCallback(async () => {
+    const reloaded = await authedRequest<User>('/me');
+    // Unless the user signed out, or in as someone else, in the meantime.
+    setUser((current) => (current?.id === reloaded.id ? reloaded : current));
+  }, [authedRequest]);
+
   return (
-    <AuthContext value={{ status, user, signIn, signUp, signOut, authedRequest }}>{children}</AuthContext>
+    <AuthContext value={{ status, user, signIn, signUp, signOut, authedRequest, reloadUser }}>
+      {children}
+    </AuthContext>
   );
 }
 

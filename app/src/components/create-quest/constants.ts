@@ -1,3 +1,4 @@
+// Icons for the category and hazard codes from GET /tags. Labels and warnings come from the API.
 export const QUEST_TAGS = [
   { code: 'plastic', label: 'Plastic', icon: '♻️' },
   { code: 'paper', label: 'Paper', icon: '📰' },
@@ -9,22 +10,10 @@ export const QUEST_TAGS = [
   { code: 'mixed', label: 'Mixed', icon: '🧹' },
 ] as const;
 
-export const SAFETY_FLAGS = [
-  {
-    code: 'sharps',
-    label: 'Sharps',
-    icon: '⚠️',
-    warning:
-      'Needles or syringes may be present. Volunteers will be told not to pick them up and will be shown drop-off and sanitation escalation information.',
-  },
-  {
-    code: 'biohazard',
-    label: 'Biohazard',
-    icon: '☣️',
-    warning:
-      'Biological waste may be present. Volunteers will be told not to touch it and will be shown drop-off and sanitation escalation information.',
-  },
-] as const;
-
-export type SafetyFlag = (typeof SAFETY_FLAGS)[number];
-export type SafetyFlagCode = SafetyFlag['code'];
+// Hazards without an icon here use ⚠️.
+export const HAZARD_ICONS: Record<string, string> = {
+  sharps: '💉',
+  biohazard: '☣️',
+  chemicals: '🧪',
+  bulky_items: '🛋️',
+};

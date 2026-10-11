@@ -1,9 +1,9 @@
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, Switch, View } from 'react-native';
 
 import AppCard from '@/components/app-card';
 import CalendarPicker from '@/components/create-quest/calendar-picker';
 import QuestIcon from '@/components/create-quest/quest-icon';
-import type { ScheduleValue } from '@/components/create-quest/schedule-utils';
+import { scheduleProblem, type ScheduleValue } from '@/components/create-quest/schedule-utils';
 import StepHeading from '@/components/create-quest/step-heading';
 import TimeRangeInput from '@/components/create-quest/time-range-input';
 import { ThemedText } from '@/components/themed-text';
@@ -14,14 +14,24 @@ type ScheduleStepProps = {
   onChange: (value: ScheduleValue) => void;
 };
 
-export default function ScheduleStep({ value, onChange }: ScheduleStepProps) {
+// Scheduling the first party is optional, so the step starts with a switch.
+export default function ScheduleStep({ enabled, onEnabledChange, disabled, done, value, onChange }: ScheduleStepProps & {
+  enabled: boolean;
+  onEnabledChange: (enabled: boolean) => void;
+  disabled: boolean;
+  done: boolean;
+}) {
+  const problem = enabled ? scheduleProblem(value) : null;
   return (
     <AppCard>
-      <StepHeading number={4} title="SCHEDULE THE PARTY" />
-      <ThemedText type="small" themeColor="textSecondary">
-        Pick a future start and a later end on the same date, up to 12 hours apart. Times use the time zone on your device.
-      </ThemedText>
-      <ScheduleFields value={value} onChange={onChange} />
+      <StepHeading number={4} title="Schedule a party" done={done} rightContent={
+        <Switch accessibilityLabel="Schedule a party" value={enabled} onValueChange={onEnabledChange} disabled={disabled} />
+      } />
+      <ThemedText type="small" themeColor="textSecondary">{enabled
+        ? 'You will lead the party and be its first attendee. Only the leader can end it. Pick a start and end on the same day, up to 12 hours apart, in your device\'s time zone.'
+        : 'Optional. The quest goes on the map without a party, and anyone can schedule one later.'}</ThemedText>
+      {enabled ? <ScheduleFields value={value} onChange={onChange} /> : null}
+      {problem ? <ThemedText type="small" themeColor="error">{problem}</ThemedText> : null}
     </AppCard>
   );
 }

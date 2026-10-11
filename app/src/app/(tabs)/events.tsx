@@ -26,11 +26,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader, { COMPACT_HEADER_HEIGHT } from '@/components/app-header';
 import { EventCard, SitePhoto } from '@/components/event-card';
-import { displayStyles, squish, TierBadge, XpBadge, xpText } from '@/components/quest-ui';
+import { displayStyles, LiveBadge, onSiteText, squish, TierBadge, XpBadge, xpText } from '@/components/quest-ui';
 import { EventsMap } from '@/components/events-map';
 import { HotspotBadge, QuestCard } from '@/components/quest-card';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import type { PartyChange } from '@/components/party-panel';
 import { BottomTabInset, MIN_TOUCH, Spacing } from '@/constants/theme';
 import { useAnnounce } from '@/hooks/use-announce';
 import { useTheme } from '@/hooks/use-theme';
@@ -38,6 +39,7 @@ import { ApiError, type EventDetail, type HotspotArea, type NearbyEvent, type Ne
 import { useAuth } from '@/lib/auth';
 import { describeDistance, describeEventTime, formatDistance, formatEventTime, TIER_LABELS } from '@/lib/event-format';
 import type { MapSelection, PinKind } from '@/lib/leaflet-map-html';
+import { useLiveParty } from '@/lib/live-party';
 import { isInNyc, NYC_REGION } from '@/lib/nyc';
 
 type Point = { latitude: number; longitude: number };
@@ -92,6 +94,7 @@ function focus(ref: RefObject<Text | null>) {
 
 export default function EventsScreen() {
   const { authedRequest } = useAuth();
+  const { party: liveParty } = useLiveParty();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -206,6 +209,50 @@ export default function EventsScreen() {
     [authedRequest],
   );
 
+  // Reloads the open card's details in place, such as after checking in to its walk-up.
+  const reloadSelected = useCallback(async () => {
+    const selection = selectedRef.current;
+    if (!selection) return;
+    try {
+      if (selection.kind === 'event') {
+        const loaded = await authedRequest<EventDetail>(`/events/${selection.id}`);
+        if (selectedRef.current === selection) setDetail(loaded);
+      } else {
+        const loaded = await authedRequest<Quest>(`/quests/${selection.id}`);
+        if (selectedRef.current === selection) setQuestDetail(loaded);
+      }
+    } catch {
+      // The card keeps what it had; the list reload below shows any change.
+    }
+  }, [authedRequest]);
+
+  // A completed quest leaves the list, so after a cleanup ends the list reloads when the card closes,
+  // and the card can show the result until then.
+  const reloadOnClose = useRef(false);
+  const onPartyChange = useCallback(
+    (change: PartyChange) => {
+      if (change === 'ended') {
+        reloadOnClose.current = true;
+        return;
+      }
+      reloadSelected();
+      loadEvents();
+    },
+    [reloadSelected, loadEvents],
+  );
+
+  // The user's cleanup ended or changed elsewhere, such as its leader ending it, so the open card
+  // catches up, and the list does once the card closes.
+  const livePartyId = liveParty?.id ?? null;
+  const lastLivePartyId = useRef(livePartyId);
+  useEffect(() => {
+    const previous = lastLivePartyId.current;
+    lastLivePartyId.current = livePartyId;
+    if (!previous || previous === livePartyId) return;
+    reloadOnClose.current = true;
+    reloadSelected();
+  }, [livePartyId, reloadSelected]);
+
   // Move screen reader focus with the selection, once the list is shown or hidden again: to the new title
   // when another pin is picked while the card is open, and back to the list when the card closes.
   const hadSelection = useRef(false);
@@ -227,7 +274,11 @@ export default function EventsScreen() {
     setDetail(null);
     setQuestDetail(null);
     setCardError(null);
-  }, []);
+    if (reloadOnClose.current) {
+      reloadOnClose.current = false;
+      loadEvents();
+    }
+  }, [loadEvents]);
 
   const onCardChange = useCallback((index: number) => {
     const wasOpen = cardOpen.current;
@@ -460,10 +511,12 @@ export default function EventsScreen() {
             <EventCard
               event={selectedEvent}
               detail={detail}
+              hot={hotAreas.has(selectedEvent.areaId)}
               busy={busy}
               error={cardError}
               onJoin={() => changeAttendance('POST')}
               onLeave={() => changeAttendance('DELETE')}
+              onPartyChange={onPartyChange}
               onClose={closeCard}
               titleRef={cardTitle}
             />
@@ -477,6 +530,7 @@ export default function EventsScreen() {
               busy={busy}
               error={cardError}
               onSchedule={scheduleParty}
+              onPartyChange={onPartyChange}
               onClose={closeCard}
               titleRef={cardTitle}
             />
@@ -541,6 +595,7 @@ const EventRow = memo(function EventRow({
     describeDistance(event.distanceM),
     party,
     status,
+    event.walkUp ? `Live now, ${onSiteText(event.walkUp.checkedInCount)}` : null,
     hot ? 'Hotspot, bonus XP' : null,
   ]
     .filter(Boolean)
@@ -561,6 +616,7 @@ const EventRow = memo(function EventRow({
         <View style={styles.rowBadges}>
           <TierBadge tier={event.difficultyTier} />
           <XpBadge maxXp={event.maxXp} />
+          {event.walkUp ? <LiveBadge count={event.walkUp.checkedInCount} /> : null}
           {hot ? <HotspotBadge /> : null}
         </View>
         <ThemedText type="small" themeColor="textSecondary">
@@ -596,7 +652,7 @@ const QuestRow = memo(function QuestRow({
   const label = [
     quest.title,
     `${TIER_LABELS[quest.difficultyTier]} difficulty`,
-    'No party yet',
+    quest.walkUp ? `Live now, ${onSiteText(quest.walkUp.checkedInCount)}` : 'No party yet',
     describeDistance(quest.distanceM),
     hot ? 'Hotspot, bonus XP' : null,
   ]
@@ -617,6 +673,7 @@ const QuestRow = memo(function QuestRow({
         </ThemedText>
         <View style={styles.rowBadges}>
           <TierBadge tier={quest.difficultyTier} />
+          {quest.walkUp ? <LiveBadge count={quest.walkUp.checkedInCount} /> : null}
           {hot ? <HotspotBadge /> : null}
         </View>
         <View style={styles.meta}>
@@ -624,7 +681,7 @@ const QuestRow = memo(function QuestRow({
             {formatDistance(quest.distanceM)}
           </ThemedText>
           <ThemedText type="smallBold" themeColor="text">
-            No party yet
+            {quest.walkUp ? 'Check in to join' : 'No party yet'}
           </ThemedText>
         </View>
       </View>

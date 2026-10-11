@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
 import { useEffect, useState, type Ref } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Pressable,
   StyleSheet,
@@ -11,31 +12,62 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import {
+  CheckedInPanel,
+  EndedPanel,
+  GEOFENCE_METERS,
+  isOver,
+  OtherCleanupNote,
+  PrimaryButton,
+  timeOfDay,
+  useAction,
+  type PartyChange,
+} from '@/components/party-panel';
 import { PhotoViewer } from '@/components/photo-viewer';
-import { Avatar, displayStyles, squish, TierBadge, xpText } from '@/components/quest-ui';
+import { Avatar, displayStyles, LiveBadge, squish, TierBadge, xpText } from '@/components/quest-ui';
 import { ThemedText } from '@/components/themed-text';
+import { WalkUpPanel } from '@/components/walk-up-panel';
 import { MIN_TOUCH, Spacing } from '@/constants/theme';
+import { useNow } from '@/hooks/use-now';
 import { useTheme, useTierColors } from '@/hooks/use-theme';
-import type { CleanupEvent, DifficultyTier, EventDetail } from '@/lib/api';
+import type { CleanupEvent, DifficultyTier, EventDetail, Party } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { describeEventTime, formatDuration, formatEventTime, lookupAddress } from '@/lib/event-format';
+import { useLiveParty } from '@/lib/live-party';
 
 // Past this text size, label and value rows stack so neither gets squeezed.
 const STACK_FONT_SCALE = 1.3;
+// How often the card checks whether the party has started or its time slot is over.
+const CLOCK_INTERVAL_MS = 15_000;
 
 interface EventCardProps {
   event: CleanupEvent;
   // Loaded after the card opens; holds the party member list.
   detail: EventDetail | null;
+  // Whether the spot is in a hotspot, where cleaning up earns bonus XP.
+  hot: boolean;
   busy: boolean;
   error: string | null;
   onJoin: () => void;
   onLeave: () => void;
+  onPartyChange: (change: PartyChange) => void;
   onClose: () => void;
   // The title, so the screen can move screen reader focus to it when the card opens.
   titleRef?: Ref<Text>;
 }
 
-export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose, titleRef }: EventCardProps) {
+export function EventCard({
+  event,
+  detail,
+  hot,
+  busy,
+  error,
+  onJoin,
+  onLeave,
+  onPartyChange,
+  onClose,
+  titleRef,
+}: EventCardProps) {
   const theme = useTheme();
   const leaderTag = useTierColors('legendary');
   // Older reports have no place name, so look up an address. Keyed by event, so switching
@@ -45,6 +77,41 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
   const where = event.placeName ?? (lookup ? (lookup.address ?? 'Pinned on the map') : 'Finding address…');
   const partySize = detail?.attendeeCount ?? event.attendeeCount;
   const duration = formatDuration(event.scheduledStart, event.scheduledEnd);
+  // The detail is fresher than the list once it has loaded.
+  const walkUp = detail ? detail.walkUp : event.walkUp;
+  const myStatus = detail ? detail.myStatus : event.myStatus;
+
+  const { user } = useAuth();
+  const session = useLiveParty();
+  const checkIn = useAction();
+  // Kept with its event, since the screen reuses this card when another event is picked.
+  const [ended, setEnded] = useState<{ eventId: string; party: Party } | null>(null);
+  // Ended here, or by the leader while the card was open.
+  const endedStatus = ended?.eventId === event.id ? ended.party.status : detail && isOver(detail.status) ? detail.status : null;
+  const now = useNow(CLOCK_INTERVAL_MS);
+  const started = Date.parse(event.scheduledStart) <= now;
+  const over = Date.parse(event.scheduledEnd) <= now;
+  const mine = session.party?.id === event.id ? session.party : null;
+  // Members who left can come back until the end; anyone else joins first.
+  const member = myStatus === 'signed_up' || myStatus === 'checked_in' || myStatus === 'left';
+  // The walk-up below is for getting going before the party. Once it starts, everyone checks in to the
+  // party instead, but a user already in the quest's walk-up still sees it, to leave or end it.
+  const inWalkUp = session.party?.questId === event.questId && session.party.scheduledStart === null;
+  const showWalkUp = (!started && !endedStatus) || inWalkUp;
+
+  const leader = detail?.organizer ?? event.organizer;
+  const onSiteCount = detail
+    ? detail.attendees.filter((a) => a.status === 'checked_in').length
+    : (mine?.members.filter((m) => m.status === 'checked_in').length ?? 0);
+
+  const checkInToEvent = () =>
+    checkIn.run(async () => {
+      const party = await session.checkInEvent(event.id);
+      AccessibilityInfo.announceForAccessibility(
+        party.leader.id === user?.id ? "You're checked in and leading the party" : "You're checked in",
+      );
+      onPartyChange('checkedIn');
+    });
 
   useEffect(() => {
     if (event.placeName) return;
@@ -68,65 +135,147 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
             </ThemedText>
           </View>
         ) : null}
+        {walkUp ? <LiveBadge count={walkUp.checkedInCount} /> : null}
       </View>
 
       <SitePhotoButton photo={event.photo} tier={event.difficultyTier} title={event.title} />
 
       {/* The reward and the button that claims it, together on an ink panel. */}
-      <View style={[styles.reward, { backgroundColor: theme.ink }]}>
-        <View accessible accessibilityLabel={`Reward: ${xpText(event.maxXp)}. Stay the whole time slot to earn it all.`}>
-          <ThemedText style={[displayStyles.base, styles.rewardXp, { color: theme.reward }]}>{xpText(event.maxXp)}</ThemedText>
-          <ThemedText type="small" style={{ color: theme.onInkSoft }}>
-            Stay the whole time slot to earn it all.
-          </ThemedText>
-        </View>
-
-        {event.isOrganizer ? (
-          <ThemedText style={[displayStyles.base, styles.rewardStatus, { color: theme.onInk }]}>
-            {"You're leading this party"}
-          </ThemedText>
-        ) : event.joined ? (
-          <View style={styles.joinedRow}>
-            <ThemedText style={[displayStyles.base, styles.rewardStatus, styles.joinedLabel, { color: theme.onInk }]}>
-              {"You're in the party"}
+      {endedStatus ? (
+        <EndedPanel status={endedStatus} tone="ink" />
+      ) : mine ? (
+        <CheckedInPanel
+          party={mine}
+          leader={leader}
+          onSiteCount={onSiteCount}
+          tone="ink"
+          hot={hot}
+          note={
+            over
+              ? leader.id === user?.id
+                ? "The party's time is up, so time from now on doesn't count. End the cleanup to award everyone's XP."
+                : `The party's time is up. Everyone's XP comes through when @${leader.username} ends the cleanup.`
+              : null
+          }
+          onLeft={() => onPartyChange('left')}
+          onEnded={(party) => {
+            setEnded({ eventId: event.id, party });
+            onPartyChange('ended');
+          }}
+        />
+      ) : (
+        <View style={[styles.reward, { backgroundColor: theme.ink }]}>
+          <View accessible accessibilityLabel={`Reward: ${xpText(event.maxXp)}. Stay the whole time slot to earn it all.`}>
+            <ThemedText style={[displayStyles.base, styles.rewardXp, { color: theme.reward }]}>{xpText(event.maxXp)}</ThemedText>
+            <ThemedText type="small" style={{ color: theme.onInkSoft }}>
+              Stay the whole time slot to earn it all.
             </ThemedText>
-            <Pressable
-              onPress={onLeave}
-              disabled={busy}
-              accessibilityRole="button"
-              accessibilityLabel="Leave party"
-              accessibilityState={{ disabled: busy, busy }}
-              style={squish([styles.leaveButton, { borderColor: theme.onInkSoft }, busy && styles.busy])}>
-              {busy ? (
-                <ActivityIndicator color={theme.onInk} />
-              ) : (
-                <ThemedText type="smallBold" style={{ color: theme.onInk }}>
-                  Leave party
-                </ThemedText>
-              )}
-            </Pressable>
           </View>
-        ) : (
-          <Pressable
-            onPress={onJoin}
-            disabled={busy}
-            accessibilityRole="button"
-            accessibilityLabel="Join party"
-            accessibilityState={{ disabled: busy, busy }}
-            style={squish([styles.joinButton, { backgroundColor: theme.reward }, busy && styles.busy])}>
-            {busy ? (
-              <ActivityIndicator color={theme.onReward} />
-            ) : (
-              <ThemedText style={[displayStyles.base, styles.joinLabel, { color: theme.onReward }]}>Join party</ThemedText>
-            )}
-          </Pressable>
-        )}
-      </View>
+
+          {over ? (
+            <ThemedText type="small" style={{ color: theme.onInk }}>
+              {event.status === 'active'
+                ? `Check-in closed at ${timeOfDay(event.scheduledEnd)}. Everyone's XP comes through when @${leader.username} ends the cleanup.`
+                : `Check-in closed at ${timeOfDay(event.scheduledEnd)}.`}
+            </ThemedText>
+          ) : started && member ? (
+            <View style={styles.checkIn}>
+              <View accessible>
+                <ThemedText style={[displayStyles.base, styles.rewardStatus, { color: theme.onInk }]}>
+                  {myStatus === 'left' ? 'Back at the spot?' : "The party's on"}
+                </ThemedText>
+                <ThemedText type="small" style={{ color: theme.onInkSoft }}>
+                  {myStatus === 'left'
+                    ? 'Check in again to keep earning XP. Your earlier time still counts.'
+                    : `Check in once you're within ${GEOFENCE_METERS} m of the spot to start earning XP.`}
+                </ThemedText>
+              </View>
+              <OtherCleanupNote other={session.party} color={theme.onInk} />
+              <PrimaryButton
+                label={myStatus === 'left' ? 'Check in again' : 'Check in'}
+                hint={`You need to be within ${GEOFENCE_METERS} m of the spot`}
+                color={theme.reward}
+                onColor={theme.onReward}
+                onPress={checkInToEvent}
+                busy={checkIn.busy}
+              />
+              {checkIn.error ? (
+                <ThemedText type="small" style={{ color: theme.onInk }}>
+                  {checkIn.error}
+                </ThemedText>
+              ) : null}
+            </View>
+          ) : event.isOrganizer ? (
+            <ThemedText style={[displayStyles.base, styles.rewardStatus, { color: theme.onInk }]}>
+              {"You're leading this party"}
+            </ThemedText>
+          ) : event.joined ? (
+            <View style={styles.joinedRow}>
+              <ThemedText style={[displayStyles.base, styles.rewardStatus, styles.joinedLabel, { color: theme.onInk }]}>
+                {"You're in the party"}
+              </ThemedText>
+              <Pressable
+                onPress={onLeave}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="Leave party"
+                accessibilityState={{ disabled: busy, busy }}
+                style={squish([styles.leaveButton, { borderColor: theme.onInkSoft }, busy && styles.busy])}>
+                {busy ? (
+                  <ActivityIndicator color={theme.onInk} />
+                ) : (
+                  <ThemedText type="smallBold" style={{ color: theme.onInk }}>
+                    Leave party
+                  </ThemedText>
+                )}
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.checkIn}>
+              {started ? (
+                <ThemedText type="small" style={{ color: theme.onInk }}>
+                  {"The party's on. Join, then check in at the spot."}
+                </ThemedText>
+              ) : null}
+              <Pressable
+                onPress={onJoin}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="Join party"
+                accessibilityState={{ disabled: busy, busy }}
+                style={squish([styles.joinButton, { backgroundColor: theme.reward }, busy && styles.busy])}>
+                {busy ? (
+                  <ActivityIndicator color={theme.onReward} />
+                ) : (
+                  <ThemedText style={[displayStyles.base, styles.joinLabel, { color: theme.onReward }]}>Join party</ThemedText>
+                )}
+              </Pressable>
+            </View>
+          )}
+        </View>
+      )}
 
       {error ? (
         <ThemedText type="small" themeColor="error">
           {error}
         </ThemedText>
+      ) : null}
+
+      {/* Anyone at the spot can start cleaning before the party, or join a walk-up already going. */}
+      {showWalkUp ? (
+        <WalkUpPanel
+          questId={event.questId}
+          walkUp={walkUp}
+          maxXp={event.maxXp}
+          hot={hot}
+          tone="plain"
+          idle={{
+            title: 'Here early?',
+            text: "You don't have to wait for the party. Check in to start cleaning now, and anyone at the spot can join.",
+            action: 'Check in now',
+          }}
+          onChange={onPartyChange}
+        />
       ) : null}
 
       <View style={styles.facts}>
@@ -359,6 +508,9 @@ const styles = StyleSheet.create({
   },
   joinedLabel: {
     flexShrink: 1,
+  },
+  checkIn: {
+    gap: Spacing.two + Spacing.one,
   },
   joinButton: {
     alignItems: 'center',

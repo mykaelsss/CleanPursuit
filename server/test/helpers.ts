@@ -66,6 +66,7 @@ export function fakeAnalyzer(analysis: Partial<Analysis> = {}, error?: Error): F
       return {
         analysis: {
           showsLitter: true,
+          title: 'Clear bottles by the bench',
           description: 'Plastic bottles by a bench.',
           categories: ['plastic'],
           hazards: [],

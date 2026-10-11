@@ -23,8 +23,8 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 
 | Part | State |
 | --- | --- |
-| Database | Migrations 001 to 008 applied to the DEV Tiger Data service, with NYC sharps drop-off sites imported |
-| App | Expo app with sign-in, nearby events, quest creation, leaderboards, a quest's drop-off sites with directions, and a safety resources page in `app/` |
+| Database | Migrations 001 to 010 applied to the DEV Tiger Data service, with NYC sharps drop-off sites imported |
+| App | Expo app with sign-in, nearby events, quest creation, check-in and ending for walk-ups and events, an XP popup, leaderboards, a quest's drop-off sites with directions, and a safety resources page in `app/` |
 | API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports, quests, events and parties, XP, leaderboards, hotspots, equipment and drop-offs |
 
 ## Tech stack

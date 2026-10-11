@@ -6,8 +6,10 @@ import Svg, { Path } from 'react-native-svg';
 import { ScheduleFields } from '@/components/create-quest/schedule-step';
 import { createInitialSchedule, isValidSchedule, scheduleDates } from '@/components/create-quest/schedule-utils';
 import { CardTitle, Fact, SitePhotoButton } from '@/components/event-card';
+import { EndedPanel, type PartyChange } from '@/components/party-panel';
 import { displayStyles, squish, TierBadge } from '@/components/quest-ui';
 import { ThemedText } from '@/components/themed-text';
+import { WalkUpPanel } from '@/components/walk-up-panel';
 import { MIN_TOUCH, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { NearbyQuest, Quest } from '@/lib/api';
@@ -23,13 +25,25 @@ interface QuestCardProps {
   busy: boolean;
   error: string | null;
   onSchedule: (start: Date, end: Date) => void;
+  onPartyChange: (change: PartyChange) => void;
   onClose: () => void;
   // The title, so the screen can move screen reader focus to it when the card opens.
   titleRef?: Ref<Text>;
 }
 
-// An open quest with no party yet: the spot, its hazards, and a way to rally the first party.
-export function QuestCard({ quest, detail, hot, busy, error, onSchedule, onClose, titleRef }: QuestCardProps) {
+// An open quest with no scheduled party: the spot, its hazards, a walk-up cleanup to start or join,
+// and a way to schedule the first party.
+export function QuestCard({
+  quest,
+  detail,
+  hot,
+  busy,
+  error,
+  onSchedule,
+  onPartyChange,
+  onClose,
+  titleRef,
+}: QuestCardProps) {
   const theme = useTheme();
   const [scheduling, setScheduling] = useState(false);
   const [schedule, setSchedule] = useState(createInitialSchedule);
@@ -41,6 +55,10 @@ export function QuestCard({ quest, detail, hot, busy, error, onSchedule, onClose
   const where = quest.placeName ?? (lookup ? (lookup.address ?? 'Pinned on the map') : 'Finding address…');
   const hazards = detail?.report.hazards ?? [];
   const needsDropoff = hazards.some((hazard) => hazard.requiresDropoff);
+  // The detail is fresher than the list once it has loaded.
+  const walkUp = detail ? detail.walkUp : quest.walkUp;
+  // Someone finished the quest while the card was open.
+  const completed = detail?.status === 'completed';
 
   useEffect(() => {
     if (quest.placeName) return;
@@ -68,29 +86,36 @@ export function QuestCard({ quest, detail, hot, busy, error, onSchedule, onClose
 
       <SitePhotoButton photo={quest.photo} tier={quest.difficultyTier} title={quest.title} />
 
-      {/* No reward to claim yet, so the panel asks for a leader instead. */}
-      <View style={[styles.panel, { backgroundColor: theme.ink }]}>
-        <View accessible>
-          <ThemedText style={[displayStyles.base, styles.panelTitle, { color: theme.reward }]}>No party yet</ThemedText>
-          <ThemedText type="small" style={{ color: theme.onInkSoft }}>
-            {hot
-              ? "Schedule one and you'll lead it. This spot is a hotspot, so finishing the cleanup earns bonus XP."
-              : "Schedule one and you'll lead it. Everyone who checks in earns XP."}
-          </ThemedText>
-        </View>
-        {scheduling ? null : (
-          <Pressable
-            onPress={() => setScheduling(true)}
-            accessibilityRole="button"
-            style={squish([styles.primaryButton, { backgroundColor: theme.reward }])}>
-            <ThemedText style={[displayStyles.base, styles.primaryLabel, { color: theme.onReward }]}>
-              Schedule a party
-            </ThemedText>
-          </Pressable>
-        )}
-      </View>
+      {/* Anyone at the spot can start cleaning now; a party can still be scheduled for later. */}
+      {completed ? (
+        <EndedPanel status="completed" tone="ink" />
+      ) : (
+        <WalkUpPanel
+          questId={quest.id}
+          walkUp={walkUp}
+          maxXp={quest.maxXp}
+          hot={hot}
+          tone="ink"
+          idle={{
+            title: 'No party yet',
+            text: "Here now? Check in to start cleaning, and anyone who comes by can join. Or schedule a party for later and you'll lead it.",
+            action: 'Check in and start',
+          }}
+          onChange={onPartyChange}>
+          {scheduling ? null : (
+            <Pressable
+              onPress={() => setScheduling(true)}
+              accessibilityRole="button"
+              style={squish([styles.secondaryButton, { borderColor: theme.onInkSoft }])}>
+              <ThemedText type="smallBold" style={{ color: theme.onInk }}>
+                Schedule a party for later
+              </ThemedText>
+            </Pressable>
+          )}
+        </WalkUpPanel>
+      )}
 
-      {scheduling ? (
+      {scheduling && !completed ? (
         <View style={styles.scheduler}>
           <ThemedText type="small" themeColor="textSecondary">
             Pick a future start and a later end on the same date, up to 12 hours apart.
@@ -237,15 +262,6 @@ const styles = StyleSheet.create({
   hotspotText: {
     fontSize: 15,
     lineHeight: 22,
-  },
-  panel: {
-    padding: Spacing.three + Spacing.one,
-    borderRadius: 20,
-    gap: Spacing.three,
-  },
-  panelTitle: {
-    fontSize: 28,
-    lineHeight: 34,
   },
   primaryButton: {
     alignItems: 'center',

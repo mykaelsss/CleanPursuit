@@ -129,6 +129,7 @@ try {
       );
       const list = (codes: string[]) => (codes.length ? codes.join(', ') : '-');
       console.log(`  shows litter  ${analysis.showsLitter ? 'yes' : 'NO'}`);
+      console.log(`  title         ${analysis.title ?? '-'}`);
       console.log(`  description   ${analysis.description}`);
       console.log(`  categories    ${list(analysis.categories)}`);
       console.log(`  hazards       ${list(analysis.hazards)}`);
