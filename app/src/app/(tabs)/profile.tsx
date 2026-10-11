@@ -3,10 +3,10 @@ import { Pressable, StyleSheet, View } from "react-native";
 import AppBadge from "@/components/app-badge";
 import AppCard from "@/components/app-card";
 import BountyPoster from "@/components/bounty-poster";
-import { MIN_TOUCH } from "@/components/event-card";
 import { squish } from "@/components/quest-ui";
 import ScreenLayout from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
+import { MIN_TOUCH } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 import { useAuth } from "@/lib/auth";
 

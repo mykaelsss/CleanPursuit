@@ -24,12 +24,12 @@ import {
 import { ReduceMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { EventCard, MIN_TOUCH, SitePhoto } from '@/components/event-card';
+import { EventCard, SitePhoto } from '@/components/event-card';
 import { displayStyles, squish, TierBadge, XpBadge, xpText } from '@/components/quest-ui';
 import { EventsMap } from '@/components/events-map';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, Spacing } from '@/constants/theme';
+import { BottomTabInset, MIN_TOUCH, Spacing } from '@/constants/theme';
 import { useAnnounce } from '@/hooks/use-announce';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, type EventDetail, type NearbyEvent } from '@/lib/api';

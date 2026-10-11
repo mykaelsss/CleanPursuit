@@ -11,15 +11,13 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { PhotoViewer } from '@/components/photo-viewer';
 import { Avatar, displayStyles, squish, TierBadge, xpText } from '@/components/quest-ui';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { MIN_TOUCH, Spacing } from '@/constants/theme';
 import { useTheme, useTierColors } from '@/hooks/use-theme';
 import type { CleanupEvent, DifficultyTier, EventDetail } from '@/lib/api';
 import { describeEventTime, formatDuration, formatEventTime, lookupAddress } from '@/lib/event-format';
-
-// Platform guidelines ask for touch targets of at least 44pt (iOS) and 48dp (Android).
-export const MIN_TOUCH = 48;
 
 // Past this text size, label and value rows stack so neither gets squeezed.
 const STACK_FONT_SCALE = 1.3;
@@ -47,6 +45,8 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
   const where = event.placeName ?? (lookup ? (lookup.address ?? 'Pinned on the map') : 'Finding address…');
   const partySize = detail?.attendeeCount ?? event.attendeeCount;
   const duration = formatDuration(event.scheduledStart, event.scheduledEnd);
+  const [viewingPhoto, setViewingPhoto] = useState(false);
+  const photoLabel = `Photo of the cleanup site for ${event.title}`;
 
   useEffect(() => {
     if (event.placeName) return;
@@ -89,11 +89,24 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
         ) : null}
       </View>
 
-      <SitePhoto
+      <Pressable
+        onPress={() => setViewingPhoto(true)}
+        accessibilityRole="imagebutton"
+        accessibilityLabel={photoLabel}
+        accessibilityHint="Opens the photo full screen"
+        style={squish(styles.photoButton)}>
+        <SitePhoto photo={event.photo} tier={event.difficultyTier} style={styles.photo} />
+        <View style={[styles.enlarge, { backgroundColor: theme.ink }]}>
+          <ThemedText type="smallBold" style={{ color: theme.onInk }}>
+            Tap to enlarge
+          </ThemedText>
+        </View>
+      </Pressable>
+      <PhotoViewer
         photo={event.photo}
-        tier={event.difficultyTier}
-        style={styles.photo}
-        label={`Photo of the cleanup site for ${event.title}`}
+        visible={viewingPhoto}
+        onClose={() => setViewingPhoto(false)}
+        label={photoLabel}
       />
 
       {/* The reward and the button that claims it, together on an ink panel. */}
@@ -292,10 +305,21 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     overflow: 'hidden',
   },
+  photoButton: {
+    position: 'relative',
+  },
   photo: {
     height: 190,
     borderWidth: 4,
     borderRadius: 20,
+  },
+  enlarge: {
+    position: 'absolute',
+    right: Spacing.two + Spacing.one,
+    bottom: Spacing.two + Spacing.one,
+    paddingVertical: Spacing.half,
+    paddingHorizontal: Spacing.two + Spacing.half,
+    borderRadius: Spacing.two,
   },
   reward: {
     padding: Spacing.three + Spacing.one,
