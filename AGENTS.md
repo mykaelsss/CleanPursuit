@@ -46,6 +46,9 @@ Only the party leader ends a party, and XP goes to checked-in members when it en
 - Throw `HttpError` with a stable `code` for expected failures, and declare those statuses with `errorSchema`.
 - Reach R2 only through `app.storage`, and return photos with `photoSchema` (file id and a presigned URL), never raw object keys.
   Tests pass `fakeStorage()` from `test/helpers.ts`, so they never touch R2.
+- Reach Gemini only through `app.analyzer`, and only from `POST /files/{id}/analysis`, which saves the result so each photo is analyzed once.
+  Gemini only suggests tags; the reporter confirms them and our rules set the tier.
+  Tests pass `fakeAnalyzer()` from `test/helpers.ts`, so they never call Gemini.
 - Add new environment variables to `src/env.ts` and `.env.example` in the same change.
 - Run `npm run typecheck` and `infisical run -- npm test` in `server/` before committing.
 

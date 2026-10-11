@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { after, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
-import { fakeStorage, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakeStorage, testEnv as env } from './helpers.ts';
 
 const skip = process.env.DATABASE_URL
   ? false
@@ -31,6 +31,7 @@ test('hotspots return map-ready areas, order by activity, enforce limits and req
     env,
     pool: createPool(env.DATABASE_URL),
     storage: fakeStorage(),
+    analyzer: fakeAnalyzer(),
   });
   t.after(() => app.close());
 

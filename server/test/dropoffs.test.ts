@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { after, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
-import { fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
 
 const skip = process.env.DATABASE_URL ? false : 'needs DATABASE_URL';
 const users: string[] = [];
@@ -29,7 +29,7 @@ after(async () => {
 
 test('drop-offs are ranked, cached, and gated by hazard requirements', { skip }, async (t) => {
   const storage = fakeStorage();
-  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage });
+  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer() });
   t.after(() => app.close());
 
   const suffix = randomBytes(5).toString('hex');

@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { after, describe, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
-import { fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
 
 const skip = process.env.DATABASE_URL
   ? false
@@ -20,7 +20,7 @@ type Storage = ReturnType<typeof fakeStorage>;
 
 async function startApp(t: { after: (fn: () => Promise<unknown>) => void }) {
   const storage = fakeStorage();
-  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage });
+  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer() });
   t.after(() => app.close());
   return { app, storage };
 }

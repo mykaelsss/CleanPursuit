@@ -43,9 +43,9 @@ The demo works end to end with these six features.
 ### Should have: what wins tracks
 
 - **Gemini photo analysis.**
-  One call per report.
-  Gemini returns structured JSON: trash categories from a fixed list, hazard flags, estimated bag count and terrain.
-  Our own rules map those to a difficulty tier: easy, medium, hard or legendary.
+  One call per report photo, made right after upload, before the report is sent.
+  Gemini returns structured JSON: whether the photo shows litter, a suggested description, trash categories from a fixed list, hazard flags, a trash volume range and terrain.
+  The report form opens prefilled, the reporter confirms or edits it, and our own rules map the tags to a difficulty tier: easy, medium, hard or legendary.
 - **Equipment and warnings lookup.**
   Tables keyed by trash category and hazard, so Gemini is never called again for gear lists.
 - **Hotspot multiplier.**
@@ -75,7 +75,11 @@ A group gets credit together, and a cleanup can take several tries.
 
 - A user submits a photo, location and description.
 - The location snaps to an H3 cell (resolution 10, about 75 m edge) stored as `area_id`.
-- The reporter picks trash categories and any hazards, and our rules set the difficulty tier from them (see [Difficulty tier](#difficulty-tier)).
+- Gemini looks at the photo as soon as it is uploaded and prefills the form with a description, trash categories, hazards and a trash amount (see [Trash amount](#trash-amount)).
+- The reporter confirms or edits the categories and any hazards, and our rules set the difficulty tier from them (see [Difficulty tier](#difficulty-tier)).
+- Selecting sharps or biohazard shows a Yes/No warning before the hazard is added to the report.
+  The warning tells volunteers not to pick up or touch the item and points them to drop-off and sanitation escalation information.
+- If Gemini is slow or down, the form starts empty and the reporter fills it in by hand.
 - If someone reports a spot that is already reported, the app tells them it exists.
   A new report is still saved and linked to the original as a duplicate.
 - A spot counts as already reported when an original report within 25 m still needs work: it has no quest yet, or its quest is open.
@@ -89,13 +93,31 @@ The first rule that matches sets the tier:
 | Tier | When |
 | --- | --- |
 | Legendary | Sharps or biohazard |
-| Hard | Chemicals or broken glass, or 10 or more estimated bags |
-| Medium | Bulky items or electronics, or 4 or more estimated bags |
+| Hard | Chemicals or broken glass, or 10 or more kitchen bags of trash |
+| Medium | Bulky items or electronics, or 4 or more kitchen bags of trash |
 | Easy | Anything else |
 
-The tags come from the reporter for now.
-Gemini will add its own tags, and the tier is recomputed from all of them, so Gemini never sets the tier directly.
+The tags and trash amount are the ones the reporter submits, after Gemini's suggestions prefill the form.
+Gemini never sets the tier directly, and it never adds a tag the reporter did not see.
+Each tag records whether it came from Gemini or the reporter.
 The tier stays provisional until a party ends, when the leader can correct the tags.
+
+### Trash amount
+
+A report estimates how much trash there is as a low and high volume in US gallons, such as 100-150 gallons.
+A single number looked more exact than it is: two Gemini models said 15 and 25 bags for the same photo.
+
+- Gemini suggests the range and the reporter confirms or changes it.
+- The API turns the range into bag counts for common bags, so volunteers can see what to bring with the bags they have.
+  For 100-150 gallons: 8-12 kitchen bags (13 gal), 4-5 large trash bags (33 gal) or 3-4 contractor bags (42 gal).
+  Bag counts are arithmetic, never Gemini's guess.
+- A range must be tight: the high end is at most 1.5 times the low end, or at most one kitchen bag (13 gal) above it for small piles.
+  Gemini's ranges are narrowed around the same middle when they are wider, and the API rejects wider ranges from reporters.
+- The tier uses a point a third of the way up the range, so it leans toward the low end and inflating the high end counts for less.
+  For 104-156 gallons that point is about 9.3 kitchen bags, so the tier is medium, not hard.
+- Bulky items that do not fit in a bag are left out of the volume and flagged as `bulky_items` instead.
+- The range only estimates the job.
+  The bags actually collected come from the party leader when the party ends.
 
 ### Quest
 
@@ -103,6 +125,9 @@ The tier stays provisional until a party ends, when the leader can correct the t
 - Any signed-in user can create the quest, not only the reporter.
 - The person who creates the quest is raising awareness, not organizing.
   They are asked if they want to join a party, but they do not have to.
+- The mobile creation flow can collect the report photo, quest title, confirmed trash categories and an initial scheduled-party plan in one guided form.
+  The API still saves those records in report -> quest -> party order.
+- A recommended party size is planning guidance for the scheduled party, not a limit on sign-ups.
 
 ### Party
 
@@ -113,6 +138,14 @@ There are two kinds, derived from whether a schedule is set:
 | --- | --- | --- |
 | Event (scheduled party) | Someone picks a time slot and asks for help | The person who scheduled it |
 | Bounty (walk-up party) | Anyone at the site checks in; others join the live party | The first person to check in |
+
+Event rules:
+
+- Anyone can schedule an event on an open quest, and becomes its leader (the organizer) and first attendee.
+- Events start in the future and last at most 12 hours.
+- Anyone can join an event until it ends, and can withdraw until they check in.
+- The organizer cannot withdraw from their own event.
+- Only the organizer can see attendees' email addresses.
 
 Leader rules:
 
@@ -163,7 +196,45 @@ stateDiagram-v2
 - Cleaning a hotspot adds bonus XP.
 - XP feeds daily, weekly and monthly leaderboards plus each user's all-time total.
 
-The exact numbers (base rate, tier multipliers, cap, hotspot threshold) are still open.
+
+| Rule | Value |
+| --- | --- |
+| Base rate | 100 XP per hour on site |
+| Tier multiplier | Easy 1x, medium 1.5x, hard 2x, legendary 3x |
+| Cap | 3 hours on site per party |
+
+An event card shows "up to" the XP for being on site for the whole time slot.
+The hotspot bonus and threshold are still open.
+
+### Levels
+
+Levels come from a user's all-time XP, so they are computed by the API and never stored.
+There are 15 levels.
+Going from level 1 to 2 takes 1,000 XP, and each level after takes 1.2 times the one before, rounded to the nearest 100 XP.
+The last level costs about ten times the first, and reaching level 15 takes 59,200 XP in total.
+The numbers live in `server/src/lib/levels.ts`.
+
+| Level | XP to reach it | XP this level takes to finish |
+| --- | --- | --- |
+| 1 | 0 | 1,000 |
+| 2 | 1,000 | 1,200 |
+| 3 | 2,200 | 1,400 |
+| 4 | 3,600 | 1,700 |
+| 5 | 5,300 | 2,100 |
+| 6 | 7,400 | 2,500 |
+| 7 | 9,900 | 3,000 |
+| 8 | 12,900 | 3,600 |
+| 9 | 16,500 | 4,300 |
+| 10 | 20,800 | 5,200 |
+| 11 | 26,000 | 6,200 |
+| 12 | 32,200 | 7,400 |
+| 13 | 39,600 | 8,900 |
+| 14 | 48,500 | 10,700 |
+| 15 | 59,200 | Max level |
+
+The curve is tuned for a typical cleanup earning a few hundred XP, so a regular volunteer reaches the middle levels in a few months and level 15 takes well over a hundred cleanups.
+Revisit it when the XP base rate is set.
+XP keeps counting past level 15 for the leaderboards.
 
 ## Tiger Data features
 
@@ -178,10 +249,21 @@ Aggregates are real-time and the daily ones refresh every 5 minutes, so the demo
 
 ## Gemini
 
-- Use a Flash-class model with a response schema for structured output.
-- Call it once per report and store the result with the report.
+- Model: `gemini-3.5-flash-lite`, set by `GEMINI_MODEL` and pinned to a stable version rather than a `-latest` alias.
+- Use a response schema for structured output, with the category and hazard codes from the database as enums.
+- Call it once per uploaded report photo and store the result in `photo_analysis`, keyed by the file.
 - Never call it on page loads.
-- Gemini only extracts features; our rules set the tier.
+- Gemini only extracts features; the reporter confirms the tags and our rules set the tier.
+- Thinking is set to low: picking from short lists needs little reasoning, and the reporter is waiting.
+- Calls time out after 20 seconds, and reporting works without Gemini.
+
+Why Flash-Lite:
+
+- The task is classification from fixed lists plus one sentence, which Flash-Lite is built for.
+- In a first test on four photos it answered in about 2 seconds, using about 1,430 input and 80 output tokens, or about $0.60 per 1,000 photos.
+- Gemini 3.8 Flash costs about 2.5 times as much per input token, more until its launch pricing ends on January 1, 2027, and took 3 to 4 seconds or timed out in the same test.
+- The risk is missing small hazards such as needles.
+  The reporter confirms every tag, and `photo_analysis` records the model, so switching `GEMINI_MODEL` is a one-line change if a test set shows Flash-Lite missing hazards.
 
 ## Directions handoff
 
@@ -209,7 +291,7 @@ The core loop ships first so there is always a working demo.
 2. Report and quest creation, with photo upload. (API done)
 3. Map and list views, plus party sign-up and check-in.
 4. Ending a party with bag count and after photo, then XP and the leaderboard.
-5. Gemini photo analysis, the tier rules and the equipment lookup.
+5. Gemini photo analysis, the tier rules and the equipment lookup. (Analysis and tier rules done in the API)
 6. Hotspot aggregate and bonus XP.
 7. Biohazard drop-off map with directions links, and the resources page.
 8. Seed a few months of backdated data for one demo region, plus a few hand-verified sharps drop-off locations.
@@ -230,16 +312,16 @@ The core loop ships first so there is always a working demo.
 
 Done:
 
-- Schema migrations `001` and `002` are applied to the DEV Tiger service and tested.
-- API: auth, photo uploads to R2, reports with duplicate detection and difficulty tiers, and quests.
+- Schema migrations `001` to `003` are applied to the DEV Tiger service and tested.
+- API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, and quests.
 
 Open:
 
-- [ ] XP numbers: base rate, tier multipliers, per-quest cap, hotspot threshold.
+- [x] XP numbers: 100 XP per hour, tier multipliers and a 3-hour cap (see [XP](#xp)).
+- [ ] Hotspot bonus XP and threshold.
 - [ ] Geofence radius for check-in and on-site pings.
 - [ ] Demo region, for seed data and drop-off locations.
 - [ ] Gear seed data for the equipment lookup.
 - [ ] Backdated demo data.
 - [ ] Dashboard aggregate.
-- [ ] Where Gemini results are stored.
 - [ ] Task split across the team: frontend, Tiger Data and backend, Gemini integration, demo data.

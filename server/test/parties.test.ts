@@ -5,6 +5,7 @@ import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
 import {
   type FakeStorage,
+  fakeAnalyzer,
   fakeStorage,
   PNG_BYTES,
   testEnv as env,
@@ -30,6 +31,7 @@ async function startApp(t: {
     env,
     pool: createPool(env.DATABASE_URL),
     storage,
+    analyzer: fakeAnalyzer(),
   });
   t.after(() => app.close());
   return { app, storage };

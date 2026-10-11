@@ -1,7 +1,7 @@
 # CleanPursuit database design
 
 The database is a Tiger Cloud service running Postgres 18 with TimescaleDB, PostGIS, H3 and citext.
-It has 20 tables, 2 of which are hypertables, plus 4 continuous aggregates and 1 view.
+It has 21 tables, 2 of which are hypertables, plus 4 continuous aggregates and 1 view.
 The source of truth is the SQL in `server/db/migrations/`; this file explains the shape and the reasons behind it.
 
 For the product side, see [mvp.md](mvp.md).
@@ -13,7 +13,7 @@ For the product side, see [mvp.md](mvp.md).
 | Service | `clean-pursuit` (id `sm60nzjanh`), DEV, us-east-1 |
 | Postgres | 18.6, with built-in `uuidv7()` |
 | Extensions | TimescaleDB 2.30, PostGIS 3.6, h3 + h3_postgis 4.2 (pulls in postgis_raster), citext |
-| Applied | `001_initial_schema.sql`, `002_leaderboards_and_hotspots.sql` |
+| Applied | `001_initial_schema.sql`, `002_leaderboards_and_hotspots.sql`, `003_photo_analysis.sql`, `004_volume_estimates.sql` |
 | Credentials | Connection string stored in Infisical, never in the repo |
 
 ## Conventions
@@ -41,6 +41,7 @@ erDiagram
 
   app_user ||--o{ report : reports
   file ||--o| report : "photo of"
+  file ||--o| photo_analysis : "analyzed by"
   report |o--o{ report : "duplicated by"
   report ||--o{ report_category : tagged
   trash_category ||--o{ report_category : ""
@@ -90,9 +91,15 @@ erDiagram
 
 | Table | Purpose |
 | --- | --- |
-| `report` | One user's sighting: photo, description, location, `difficulty_tier`, optional `estimated_bag_count`. `area_id` is generated from the location. |
+| `report` | One user's sighting: photo, description, location, an optional `place_name` (a readable name for the spot, shown instead of coordinates), `difficulty_tier`, and an optional trash volume range (`estimated_volume_min_gallons`, `estimated_volume_max_gallons`). `area_id` is generated from the location. `estimated_bag_count` is no longer written and will be dropped. |
 | `report_category` | Trash categories on a report, with `source` (`user` or `gemini`). |
 | `report_hazard` | Hazard flags on a report, with `source`. |
+| `photo_analysis` | Gemini's suggestions for one uploaded photo, keyed by `file_id`: whether it shows litter, a description, category and hazard codes, a trash volume range in gallons and `terrain`, plus the model, token counts and latency. |
+
+Gemini runs once per photo, before the report exists, and its result prefills the report form.
+The reporter confirms or edits the tags, and a tag on the report has `source = 'gemini'` when Gemini suggested it for that photo and the reporter kept it.
+`photo_analysis` keeps the codes as plain arrays because a row is a snapshot of what the model said; the API only lets Gemini pick codes that exist at the time.
+The token counts and latency are there to compare models on cost and speed.
 
 Duplicate rules, enforced by triggers:
 
@@ -104,7 +111,7 @@ Duplicate rules, enforced by triggers:
 `area_id` is `h3_lat_lng_to_cell(location, 10)`, a hexagon with an edge of about 75 m.
 It is a stored generated column, so it can never disagree with the location.
 
-`difficulty_tier` is set by API rules from the tags, not by Gemini directly.
+`difficulty_tier` is set by API rules from the report's tags, not by Gemini directly.
 It is provisional until a party ends, when the leader can correct the tags.
 
 ### Quests and parties
@@ -213,6 +220,7 @@ All aggregates are real-time (`materialized_only = false`) and bucket in UTC.
 
 - XP aggregates carry `xp`, `minutes_on_site` and `parties` per user per bucket, indexed on `(bucket, xp DESC)`.
 - All-time XP is `app_user.total_xp`.
+- A user's level is derived from `total_xp` in the API and is not stored (see [Levels](mvp.md#levels)).
 - `area_hotspot_30d` returns `distinct_reporters`, `reports` and `last_reported_day` per `area_id` for the last 30 days.
 - The heat map and the hotspot bonus use `distinct_reporters`, so one person re-reporting a spot cannot heat it up alone.
 - The bonus threshold (for example 3 or more reporters) lives in the API.
@@ -233,7 +241,7 @@ CALL refresh_continuous_aggregate('report_daily_by_area_reporter', NULL, NULL);
 - Seed gear rows in `item`, `category_item` and `hazard_item`.
 - Seed a few months of backdated demo data for one region, plus hand-verified drop-offs.
 - Add a dashboard aggregate; it needs `area_id` on party events.
-- Decide where Gemini results are stored (likely a 1:1 `report_analysis` table).
+- Drop `report.estimated_bag_count` once no deployed code reads it (kept in 004 so older branches still work on DEV).
 - Clean up R2 objects that were uploaded but never confirmed, and `file` rows that were never attached to anything.
 - Guild leaderboard, later.
 - Verify Tiger's TLS certificate in the API by trusting Timescale's CA.

@@ -6,7 +6,7 @@ It is being built for the 48-hour Hack Knight hackathon.
 ## How it works
 
 1. **Report** a spot with a photo, location and description.
-   Gemini tags the trash and hazards, and our rules set a difficulty tier.
+   Gemini suggests the trash categories and hazards, the reporter confirms them, and our rules set a difficulty tier.
 2. **Create a quest** from the report so others can see the problem.
 3. **Join a party** to clean it up, either a scheduled event or a walk-up on an open bounty.
    Members check in by GPS.
@@ -22,9 +22,9 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 
 | Part | State |
 | --- | --- |
-| Database | Migrations 001 and 002 applied to the DEV Tiger Data service |
+| Database | Migrations 001 to 006 applied to the DEV Tiger Data service (005 is on the `biohazard-dropoffs` branch) |
 | App | Expo starter project in `app/` |
-| API | Fastify in `server/` with auth, photo uploads, reports and quests |
+| API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports and quests |
 
 ## Tech stack
 
@@ -34,7 +34,7 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 | API | Node.js 24 with Fastify 5, TypeScript, Zod and `pg`, with its own auth (argon2id, JWT access tokens, rotating refresh tokens) |
 | Database | Tiger Data: Postgres 18 with TimescaleDB, PostGIS, H3 and citext |
 | File storage | Cloudflare R2 |
-| AI | Gemini, called once per report |
+| AI | Gemini (`gemini-3.5-flash-lite`), called once per report photo |
 | Secrets | Infisical |
 
 ## Repo layout
@@ -44,6 +44,8 @@ app/                    React Native app (Expo)
 server/src/             Fastify API
 server/test/            API tests
 server/db/migrations/   Numbered SQL migrations, applied in order
+server/db/seed/         Photos for the demo data script
+scripts/phone.sh        Runs the API and app for Expo Go on a phone, over tunnels
 docs/mvp.md             Product summary: scope, core loop, XP rules, risks
 docs/database.md        Database design: tables, relationships, aggregates
 AGENTS.md               Instructions for coding agents (CLAUDE.md links to it)
@@ -91,25 +93,56 @@ npx expo start
 
 From the Expo output you can open the app in an iOS simulator, an Android emulator, a browser or Expo Go.
 Add packages with `npx expo install <package>` so versions match the Expo SDK.
+The app has `expo-dev-client`, so press `s` in the Expo output (or start with `npx expo start --go`) to open it in Expo Go.
+
+### Run the app on your phone
+
+```bash
+./scripts/phone.sh
+```
+
+This starts the API, puts it and Expo behind tunnels and points the app at the API tunnel, so it works on any network, including a phone hotspot.
+Scan the QR code with your phone's camera to open the app in Expo Go, and press Ctrl+C to stop everything.
+Expo Go on iOS needs you logged in to the same Expo account in the app and in the terminal (`npx expo login`).
+It needs the Infisical CLI and [ngrok](https://ngrok.com) with an authtoken; the first run may ask to install `@expo/ngrok`.
+While it runs, anyone with the API tunnel URL can reach the API and the DEV database behind it.
 
 ### Apply database migrations
 
 Migrations run in order against the Tiger Data service, one file at a time.
-Only run files that have not been applied yet; 001 and 002 are already on the DEV service.
+Only run files that have not been applied yet; 001 to 006 are already on the DEV service.
 The connection string comes from Infisical, so wrap the command in `infisical run`:
 
 ```bash
-infisical run -- sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/db/migrations/003_example.sql'
+infisical run -- sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/db/migrations/005_example.sql'
 ```
 
 The single quotes matter: `$DATABASE_URL` must expand inside the command Infisical runs, not in your shell.
 Applied migrations are never edited; changes go in a new numbered file.
+
+### Load demo data
+
+```bash
+cd server
+infisical run -- npm run seed:demo
+```
+
+This creates 26 demo users and 11 cleanup events across the five boroughs, each with a report, a photo and a quest.
+One event is under way and the rest start over the next week, at set hours in New York time.
+Sign in as `demo` with the password `cleanpursuit-demo`: that account leads the Prospect Park event and has joined the Meadow Lake and Jamaica Avenue ones.
+Every other demo user has the same password.
+
+Rerun it shortly before a demo.
+Each run deletes what the demo accounts created (including parties other users scheduled on demo quests) and recreates it, so event times stay current.
+Demo accounts are the ones with an `@demo.example.com` email, and they keep their ids, so the app stays signed in across runs.
+The photos are in `server/db/seed/photos/`, credited in its `CREDITS.md`.
 
 ## Auth
 
 The API handles accounts itself.
 
 - `POST /auth/register` and `POST /auth/login` return the user, an access token and a refresh token.
+  The user includes `totalXp` and `level` (`number`, `xpIntoLevel` and `xpForNextLevel`, which is null at the max level); see [Levels](docs/mvp.md#levels).
 - Send the access token as `Authorization: Bearer <token>`.
   It lasts 15 minutes.
 - When a request fails with code `ACCESS_TOKEN_EXPIRED`, call `POST /auth/refresh` with the refresh token to get a new pair.
@@ -137,14 +170,40 @@ Photo URLs in responses expire after an hour, so cache images by file id rather 
 ## Reports and quests
 
 - `GET /tags` lists the trash categories and hazards for the report form.
+- `POST /files/{id}/analysis` asks Gemini to suggest a description, categories, hazards and a trash amount for an uploaded photo.
+  Call it right after `POST /files` and prefill the report form with the result while the reporter fills in the rest.
+  Each photo is analyzed once; calling again returns the saved result.
+  If `showsLitter` is false, warn the reporter but let them continue.
+  On 503 `ANALYSIS_UNAVAILABLE`, show the form empty; reporting never depends on Gemini.
+- Trash amounts are a range in gallons (`estimatedVolume: { minGallons, maxGallons }`), and responses add `bags` with counts for kitchen (13 gal), large (33 gal) and contractor (42 gal) bags.
+  Show those so volunteers know what to bring.
+  The high end may be at most 1.5 times the low end (or one kitchen bag above it); wider ranges get 400 `INVALID_VOLUME_RANGE`.
+  See [Trash amount](docs/mvp.md#trash-amount).
 - `POST /reports` files a report.
-  The difficulty tier comes from the tags, using the rules in [docs/mvp.md](docs/mvp.md#difficulty-tier).
+  Send `placeName`, a readable name for the spot such as "Tompkins Square Park, East Village", so the app can show it instead of coordinates.
+  Suggest one from the phone's geocoder and let the reporter edit it.
+  The difficulty tier comes from the tags the reporter sends, using the rules in [docs/mvp.md](docs/mvp.md#difficulty-tier).
+  Tags that Gemini suggested and the reporter kept are recorded with `gemini` as their source.
   If the spot is already reported, the report is still saved and `duplicateOf` points at the original and its quest.
 - `POST /reports/{id}/quest` turns an original report into a quest.
 - `GET /quests?latitude=&longitude=` lists open quests nearby, nearest first, for the map and list.
 - `GET /reports/{id}` and `GET /quests/{id}` return one of each.
 
 The full request and response shapes are in the interactive docs at `/docs`.
+
+### Try photo analysis on your own photos
+
+This runs photos through the real flow (R2 upload, `POST /files`, Gemini) and prints what Gemini suggests, with timing and token counts.
+It deletes every user, file and photo it creates when it finishes.
+
+```bash
+cd server
+infisical run -- npm run try:analysis -- photo.jpg some-folder/
+infisical run -- npm run try:analysis -- --model gemini-3.5-flash-lite --model gemini-3.8-flash some-folder/
+```
+
+Pass `--model` more than once to compare models on the same photos.
+Photos must be JPEG, PNG or WebP of at most 10 MB, and each model can analyze 30 photos per run.
 
 ## Secrets
 

@@ -1,56 +1,28 @@
-# Welcome to your Expo app 👋
+# CleanPursuit app
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+The React Native (Expo) app for CleanPursuit.
+See the repo root for the product and API docs.
 
-## Get started
+## Run it
 
-1. Install dependencies
+1. Install dependencies with `npm install`.
+2. Start the API in `server/` with `infisical run -- npm run dev`.
+3. Build and run a development build with `npm run android` or `npm run ios`, or open it in a browser with `npm run web`.
 
-   ```bash
-   npm install
-   ```
+The app calls the API at `http://localhost:3000` (`http://10.0.2.2:3000` on the Android emulator).
+On a physical device, copy `.env.example` to `.env.local` and set `EXPO_PUBLIC_API_URL` to your computer's LAN address.
 
-2. Start the app
+## Map
 
-   ```bash
-   npx expo start
-   ```
+The events map is [Leaflet](https://leafletjs.com) with OpenStreetMap's standard tiles, so it needs no API key.
+Those tiles are run by volunteers, so follow the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/): fine for development and a demo, but switch to a paid tile provider before a real launch.
+It runs in a WebView on phones and an iframe on web, from one page in `src/lib/leaflet-map-html.ts`.
 
-In the output, you'll find options to open the app in a
+## Layout
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- `src/app/`: screens and layouts (Expo Router).
+  `sign-in.tsx` is shown when signed out, and `(tabs)/` when signed in.
+- `src/lib/`: the API client, auth context and token storage.
+- `src/components/`, `src/constants/`, `src/hooks/`: shared UI, theme and hooks.
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-### Other setup steps
-
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Run `npx tsc --noEmit` and `npm run lint` before committing.
