@@ -1,10 +1,10 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from "react-native";
 
-import AppCard from '@/components/app-card';
-import QuestIcon from '@/components/create-quest/quest-icon';
-import StepHeading from '@/components/create-quest/step-heading';
-import { ThemedText } from '@/components/themed-text';
-import { useTheme } from '@/hooks/use-theme';
+import AppCard from "@/components/app-card";
+import QuestIcon from "@/components/create-quest/quest-icon";
+import StepHeading from "@/components/create-quest/step-heading";
+import { ThemedText } from "@/components/themed-text";
+import { useTheme } from "@/hooks/use-theme";
 
 const MIN_PARTY_SIZE = 1;
 const MAX_PARTY_SIZE = 10;
@@ -44,7 +44,7 @@ export default function PartySizeStep({ value, onChange }: PartySizeStepProps) {
             {value}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            {value === 1 ? 'volunteer' : 'volunteers'}
+            {value === 1 ? "volunteer" : "volunteers"}
           </ThemedText>
         </View>
         <StepperButton
@@ -74,7 +74,7 @@ function StepperButton({
   onPress,
 }: {
   label: string;
-  symbol: '-' | '+';
+  symbol: "-" | "+";
   disabled: boolean;
   onPress: () => void;
 }) {
@@ -91,30 +91,33 @@ function StepperButton({
         { backgroundColor: theme.backgroundElement, borderColor: theme.border },
         disabled && styles.disabled,
         pressed && styles.pressed,
-      ]}>
+      ]}
+    >
       <ThemedText type="subtitle">{symbol}</ThemedText>
     </Pressable>
   );
 }
 
 function partyTip(size: number) {
-  if (size <= 4) return 'A nimble crew is great for a focused neighborhood cleanup.';
-  if (size <= 8) return 'A team this size can split into pairs and cover more ground.';
-  return 'For a larger party, plan a quick welcome and clear team zones.';
+  if (size <= 4)
+    return "A minimal crew is great for a focused neighborhood cleanup.";
+  if (size <= 8)
+    return "A team this size can split into pairs and cover more ground.";
+  return "For a larger party, plan a quick welcome and clear team zones.";
 }
 
 const styles = StyleSheet.create({
   intro: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
   icon: {
     width: 48,
     height: 48,
     borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   copy: {
     flex: 1,
@@ -123,20 +126,20 @@ const styles = StyleSheet.create({
   stepper: {
     borderRadius: 16,
     padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   stepperButton: {
     width: 52,
     height: 52,
     borderRadius: 16,
     borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   value: {
-    alignItems: 'center',
+    alignItems: "center",
   },
   number: {
     fontSize: 38,
