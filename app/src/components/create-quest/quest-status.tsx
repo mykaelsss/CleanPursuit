@@ -62,7 +62,7 @@ export function QuestReward() {
           PARTY REWARD
         </ThemedText>
         <ThemedText type="small" style={{ color: theme.onReward }}>
-          Checked-in volunteers earn XP when the cleanup is completed.
+          Checked-in volunteers earn up to 100 XP when the leader ends a full or partial cleanup with an after photo.
         </ThemedText>
       </View>
       <View style={[styles.rewardIcon, { backgroundColor: theme.backgroundElement }]}>
@@ -72,12 +72,18 @@ export function QuestReward() {
   );
 }
 
-export function CreateQuestButton({ ready, onPress }: { ready: boolean; onPress: () => void }) {
+export function CreateQuestButton({ ready, busy = false, label = 'Create quest', onPress }: {
+  ready: boolean; busy?: boolean; label?: string; onPress: () => void;
+}) {
   const theme = useTheme();
 
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ disabled: !ready || busy, busy }}
+      aria-disabled={!ready || busy}
+      aria-busy={busy}
+      disabled={!ready || busy}
       onPress={onPress}
       style={({ pressed }) => [
         styles.createButton,
@@ -88,7 +94,7 @@ export function CreateQuestButton({ ready, onPress }: { ready: boolean; onPress:
       <ThemedText
         type="smallBold"
         style={{ color: ready ? theme.onTint : theme.textSecondary, fontSize: 16 }}>
-        Create quest
+        {label}
       </ThemedText>
     </Pressable>
   );

@@ -47,7 +47,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "CleanPursuit uses your location to show cleanup quests near you."
+          "locationWhenInUsePermission": "CleanPursuit uses your location to pin reported litter and show nearby cleanup quests."
         }
       ]
     ],

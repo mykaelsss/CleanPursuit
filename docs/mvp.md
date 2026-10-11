@@ -125,9 +125,26 @@ A single number looked more exact than it is: two Gemini models said 15 and 25 b
 - Any signed-in user can create the quest, not only the reporter.
 - The person who creates the quest is raising awareness, not organizing.
   They are asked if they want to join a party, but they do not have to.
-- The mobile creation flow can collect the report photo, quest title, confirmed trash categories and an initial scheduled-party plan in one guided form.
+- The Create a quest tab collects a before photo, quest title, description, confirmed categories and hazards, an optional trash-volume range, and a location with an editable place name.
+  Photos are resized and converted to JPEG before uploading directly to R2.
+  Gemini suggestions prefill untouched fields; manual edits are preserved if analysis finishes later.
+  The reporter can continue without AI suggestions and must confirm both the report details and the cleanup coordinates before submitting.
+  On phones, GPS and address lookup help pin the spot; web supports GPS or manually entered coordinates.
+  Sharps and biohazard suggestions require the same Yes/No warning confirmation as manually selected hazards.
+  Scheduling an initial party is optional.
+  When enabled, it makes the creator the organizer and first attendee, with a future start and a duration of at most 12 hours.
   The API still saves those records in report -> quest -> party order.
-- A recommended party size is planning guidance for the scheduled party, not a limit on sign-ups.
+- Duplicate reports are saved and linked to the original quest instead of creating a second quest.
+  If the original report has no quest, the flow can create one from it.
+  Scheduling on a duplicate requires reviewing the original quest and its location first.
+  New hazard flags from the duplicate sighting remain visible alongside the original quest's warnings.
+  Gear recommendations for the original are hidden when the new sighting adds a hazard.
+- Failed requests keep the form and resume from saved records while the tab remains mounted.
+  An uploader-only photo-to-report lookup recovers a report whose response was lost; reading the report recovers its quest.
+  Repeating the same event time slot as its organizer returns the existing scheduled or active party.
+- The saved quest summary shows the API-assigned difficulty, bag estimates, gear, hazard warnings and nearby drop-offs with directions, or sanitation escalation guidance.
+- Recommended party size is not collected yet because the API does not store it.
+  Parties have no sign-up limit.
 
 ### Party
 

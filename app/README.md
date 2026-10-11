@@ -44,6 +44,29 @@ Rows show period XP, equal XP shares a rank, and accounts without positive perio
 The `me` response shows your rank even outside the top 100, or Unranked when your period XP is zero or negative.
 Opening the tab or pulling to refresh fetches current results; failed refreshes keep the previous results and show a retry button.
 
+## Create a quest
+
+The tab uploads a resized JPEG before photo directly to R2 and asks the API for saved Gemini suggestions.
+Report descriptions, categories, all five hazard flags and optional gallon ranges are editable; late AI responses preserve manual edits.
+AI can be skipped or unavailable without blocking reporting.
+Confirm the report details and cleanup coordinates before submitting.
+Use GPS, an address lookup on phones, or manually entered coordinates, and give the spot a readable place name.
+The form shows bag equivalents and validates the API's volume-range rules.
+
+Scheduling a party is optional.
+If enabled, choose a future start and a later end on the same date, at most 12 hours apart, in the device's time zone.
+Scheduling makes you the organizer and first attendee.
+The API saves the report, quest and optional event in order; failures retain completed records for retries while the tab remains mounted.
+Duplicate reports use the original quest and ask you to review it before scheduling a party there.
+Additional hazards from the new sighting remain visible and hide the original gear recommendations.
+The result shows difficulty, bag estimates, equipment, hazard warnings and drop-off or escalation guidance.
+Party size is not collected because the API does not store a target or limit sign-ups.
+
+Photo preparation uses `expo-image-manipulator` and native uploads use `expo-file-system` with `expo/fetch`.
+Both are available in Expo Go; an existing development build needs rebuilding after installing these dependencies.
+
+Run client workflow regression tests with `npm test`.
+
 ## Layout
 
 - `src/app/`: screens and layouts (Expo Router).

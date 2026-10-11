@@ -63,7 +63,7 @@ export default function PhotoStep({ photo, onPhotoChange }: PhotoStepProps) {
           </Pressable>
           <View style={[styles.readyBadge, { backgroundColor: theme.primary }]}>
             <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>
-              PHOTO READY
+              PHOTO SELECTED
             </ThemedText>
           </View>
         </View>

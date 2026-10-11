@@ -109,6 +109,10 @@ Duplicate rules, enforced by triggers:
 - A report that has duplicates, or has a quest, cannot become a duplicate.
 - Only an original report can become a quest.
 
+`GET /files/{id}/report` lets the uploader recover the report attached to their confirmed photo after a lost response.
+It returns null when the photo has no report, and does not allow another user to look up that upload.
+No additional recovery columns are stored.
+
 `area_id` is `h3_lat_lng_to_cell(location, 10)`, a hexagon with an edge of about 75 m.
 It is a stored generated column, so it can never disagree with the location.
 
@@ -149,6 +153,9 @@ stateDiagram-v2
 ```
 
 Rules that live in the API, not the database:
+
+- Scheduling the same quest, organizer and exact time slot again returns the existing scheduled or active event.
+  The API locks the quest row while checking and inserting, so concurrent retries create one party and one organizer membership.
 
 - Check-in needs a signed-up member, a scheduled party inside its time slot, an open quest and a location within 100 m of the report.
   The first check-in sets the party `active` and `started_at`.

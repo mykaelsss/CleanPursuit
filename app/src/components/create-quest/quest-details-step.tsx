@@ -1,25 +1,40 @@
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import AppCard from '@/components/app-card';
-import { QUEST_TAGS, SAFETY_FLAGS, type SafetyFlagCode } from '@/components/create-quest/constants';
+import { QUEST_TAGS } from '@/components/create-quest/constants';
+import { FormField } from '@/components/create-quest/form-controls';
 import StepHeading from '@/components/create-quest/step-heading';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
+import type { ReportTags } from '@/lib/api';
+import { parseVolume } from '@/lib/create-quest';
 
 type QuestDetailsStepProps = {
   title: string;
+  description: string;
+  volumeLow: string;
+  volumeHigh: string;
+  tags: ReportTags;
   selectedTags: string[];
-  selectedSafetyFlags: SafetyFlagCode[];
+  selectedSafetyFlags: string[];
   onTitleChange: (title: string) => void;
+  onDescriptionChange: (description: string) => void;
+  onVolumeChange: (low: string, high: string) => void;
   onTagPress: (code: string) => void;
-  onSafetyFlagPress: (code: SafetyFlagCode) => void;
+  onSafetyFlagPress: (code: string) => void;
 };
 
 export default function QuestDetailsStep({
   title,
+  description,
+  volumeLow,
+  volumeHigh,
+  tags,
   selectedTags,
   selectedSafetyFlags,
   onTitleChange,
+  onDescriptionChange,
+  onVolumeChange,
   onTagPress,
   onSafetyFlagPress,
 }: QuestDetailsStepProps) {
@@ -54,15 +69,18 @@ export default function QuestDetailsStep({
         </ThemedText>
       </View>
 
+      <FormField label="Describe the litter and the spot" value={description} multiline maxLength={2000}
+        placeholder="What needs cleaning, and where should volunteers look?" onChangeText={onDescriptionChange} />
+
       <View style={styles.fieldGroup}>
         <FieldLabel title="What will your party find?" helper="Select all" />
         <View style={styles.tags}>
-          {QUEST_TAGS.map((tag) => {
+          {tags.categories.map((tag) => {
             const selected = selectedTags.includes(tag.code);
             return (
               <TagButton
                 key={tag.code}
-                icon={tag.icon}
+                icon={QUEST_TAGS.find((item) => item.code === tag.code)?.icon ?? '♻️'}
                 label={tag.label}
                 selected={selected}
                 onPress={() => onTagPress(tag.code)}
@@ -78,20 +96,49 @@ export default function QuestDetailsStep({
           Flag items that need drop-off or sanitation escalation guidance.
         </ThemedText>
         <View style={styles.tags}>
-          {SAFETY_FLAGS.map((flag) => (
+          {tags.hazards.map((flag) => (
             <TagButton
               safety
               key={flag.code}
-              icon={flag.icon}
+              icon="⚠️"
               label={flag.label}
               selected={selectedSafetyFlags.includes(flag.code)}
               onPress={() => onSafetyFlagPress(flag.code)}
             />
           ))}
         </View>
+        {tags.hazards.filter((flag) => selectedSafetyFlags.includes(flag.code)).map((flag) => (
+          <ThemedText key={flag.code} type="small" themeColor="textSecondary">{flag.warning}</ThemedText>
+        ))}
+      </View>
+
+      <View style={styles.fieldGroup}>
+        <FieldLabel title="Trash amount (US gallons)" helper="Optional" />
+        <View style={styles.labelRow}>
+          <View style={{ flex: 1 }}><FormField label="Low estimate" value={volumeLow} keyboardType="number-pad"
+            onChangeText={(low) => onVolumeChange(low, volumeHigh)} /></View>
+          <View style={{ flex: 1 }}><FormField label="High estimate" value={volumeHigh} keyboardType="number-pad"
+            onChangeText={(high) => onVolumeChange(volumeLow, high)} /></View>
+        </View>
+        <VolumeSummary low={volumeLow} high={volumeHigh} />
       </View>
     </AppCard>
   );
+}
+
+function VolumeSummary({ low, high }: { low: string; high: string }) {
+  const range = parseVolume(low, high);
+  if (range === null) return <ThemedText type="small" themeColor="error">
+    Use whole gallons from 1 to 10,000. The high estimate must be at least the low estimate and no more than 1.5 times it or 13 gallons above it.
+  </ThemedText>;
+  if (!range) return <ThemedText type="small" themeColor="textSecondary">Leave both blank if you are unsure. Flag bulky items separately.</ThemedText>;
+  return <View style={styles.fieldGroup}>
+    {[{ label: 'Kitchen', gallons: 13 }, { label: 'Large', gallons: 33 }, { label: 'Contractor', gallons: 42 }].map((bag) => (
+      <ThemedText key={bag.gallons} type="small" themeColor="textSecondary">
+        {bag.label} ({bag.gallons} gal): {Math.ceil(range.minGallons / bag.gallons)}-{Math.ceil(range.maxGallons / bag.gallons)} bags
+      </ThemedText>
+    ))}
+  </View>;
 }
 
 function FieldLabel({ title, helper }: { title: string; helper: string }) {
@@ -122,6 +169,7 @@ function TagButton({ icon, label, selected, safety = false, onPress }: TagButton
     <Pressable
       accessibilityRole="checkbox"
       accessibilityState={{ checked: selected }}
+      aria-checked={selected}
       onPress={onPress}
       style={({ pressed }) => [
         styles.tag,

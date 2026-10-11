@@ -24,7 +24,7 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 | Part | State |
 | --- | --- |
 | Database | Migrations 001 to 007 applied to the DEV Tiger Data service (005 is on the `biohazard-dropoffs` branch) |
-| App | Expo starter project in `app/` |
+| App | Expo app with sign-in, nearby events, quest creation and leaderboards in `app/` |
 | API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports, quests, events and parties, XP, leaderboards, hotspots, equipment and drop-offs |
 
 ## Tech stack
@@ -189,6 +189,13 @@ Photo URLs in responses expire after an hour, so cache images by file id rather 
 - `POST /reports/{id}/quest` turns an original report into a quest.
 - `GET /quests?latitude=&longitude=` lists open quests nearby, nearest first, for the map and list.
 - `GET /reports/{id}` and `GET /quests/{id}` return one of each.
+- `GET /files/{id}/report` lets the uploader recover the report for a confirmed photo if the submission response was lost.
+  It returns null before that photo has a report; other users get 404.
+
+The app's Create a quest tab uploads and analyzes the photo, lets the reporter edit and confirm the report details and cleanup location, then saves the report and quest.
+It can also schedule an initial party, which makes the creator its organizer and first attendee.
+Duplicate reports link to the original quest and require reviewing that quest before scheduling there.
+AI failure leaves manual reporting available, and partial failures keep saved records for retries.
 
 The full request and response shapes are in the interactive docs at `/docs`.
 
@@ -214,6 +221,7 @@ Two sets of routes create scheduled parties, and both make the same `party` rows
 - `GET /events?latitude=&longitude=` lists upcoming and in-progress events nearby, soonest first.
 - `POST /quests/{id}/events` schedules an event on an open quest.
   Events start in the future and last at most 12 hours.
+  Retrying the same organizer and exact time slot returns their existing scheduled or active event.
 - `POST /events/{id}/join` signs up for an event until it ends, and `DELETE /events/{id}/join` withdraws before check-in.
 - `GET /events/{id}` returns an event with its attendees.
 - `POST /quests/{questId}/parties` also schedules a party on an open quest.
