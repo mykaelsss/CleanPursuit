@@ -28,11 +28,12 @@ import equipmentRoutes from './routes/equipment.ts';
 import dropoffRoutes from './routes/dropoffs.ts';
 import hotspotRoutes from './routes/hotspots.ts';
 import healthRoutes from './routes/health.ts';
+import leaderboardRoutes from './routes/leaderboard.ts';
 import meRoutes from './routes/me.ts';
 import questRoutes from './routes/quests.ts';
 import reportRoutes from './routes/reports.ts';
 import partiesRoutes from './routes/parties.ts';
-import leaderboardRoutes from './routes/leaderboards.ts';
+import leaderboardsRoutes from './routes/leaderboards.ts';
 
 export interface BuildAppOptions {
   env: Env;
@@ -113,6 +114,7 @@ export async function buildApp({ env, pool, storage: objectStorage, analyzer: ph
   await app.register(eventRoutes);
   await app.register(partiesRoutes);
   await app.register(leaderboardRoutes);
+  await app.register(leaderboardsRoutes);
 
   return app;
 }

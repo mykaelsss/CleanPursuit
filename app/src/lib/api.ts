@@ -32,6 +32,18 @@ export interface Tokens {
 
 export type Session = Tokens & { user: User };
 
+// Users with equal XP share a rank.
+export interface LeaderboardEntry {
+  rank: number;
+  user: { id: string; username: string };
+  totalXp: number;
+}
+
+export interface Leaderboard {
+  entries: LeaderboardEntry[];
+  me: { rank: number; totalXp: number };
+}
+
 export type DifficultyTier = 'easy' | 'medium' | 'hard' | 'legendary';
 
 // An event is a scheduled cleanup on a quest. The organizer is the party leader.
