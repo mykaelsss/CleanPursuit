@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import AppHeader from '@/components/app-header';
+import AuthWelcome from '@/components/auth-welcome';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -20,13 +21,14 @@ import { useTheme } from '@/hooks/use-theme';
 import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
-type Mode = 'signIn' | 'signUp';
+type AuthMode = 'signIn' | 'signUp';
+type Mode = 'welcome' | AuthMode;
 
 // These mirror the API's rules, so most mistakes are caught before a round trip.
 const USERNAME = /^[A-Za-z0-9_]{3,32}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function validate(mode: Mode, fields: { identifier: string; username: string; email: string; password: string }) {
+function validate(mode: AuthMode, fields: { identifier: string; username: string; email: string; password: string }) {
   if (mode === 'signIn') {
     if (!fields.identifier.trim()) return 'Enter your username or email';
     if (!fields.password) return 'Enter your password';
@@ -42,7 +44,7 @@ function validate(mode: Mode, fields: { identifier: string; username: string; em
 export default function SignInScreen() {
   const { signIn, signUp } = useAuth();
   const theme = useTheme();
-  const [mode, setMode] = useState<Mode>('signIn');
+  const [mode, setMode] = useState<Mode>('welcome');
   const [identifier, setIdentifier] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -59,7 +61,7 @@ export default function SignInScreen() {
   }
 
   async function submit() {
-    if (submitting) return;
+    if (submitting || mode === 'welcome') return;
     const problem = validate(mode, { identifier, username, email, password });
     if (problem) {
       setError(problem);
@@ -86,102 +88,128 @@ export default function SignInScreen() {
       <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-            <View style={styles.intro}>
-              <ThemedText themeColor="textSecondary" style={styles.centered}>
-                Report litter, rally a party to clean it up and earn XP.
-              </ThemedText>
-            </View>
-
-            <ThemedView type="backgroundElement" style={styles.segmented}>
-              <Segment label="Log in" active={!signingUp} onPress={() => switchMode('signIn')} />
-              <Segment label="Sign up" active={signingUp} onPress={() => switchMode('signUp')} />
-            </ThemedView>
-
-            {/* Keyed by mode so each form gets fresh inputs. Changing a live password field's autofill
-                hints makes iOS and Safari re-run password AutoFill, which flickers. */}
-            <View key={mode} style={styles.form}>
-              {signingUp ? (
-                <>
-                  <Field
-                    label="Username"
-                    value={username}
-                    onChangeText={setUsername}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    autoComplete="username-new"
-                    textContentType="username"
-                    returnKeyType="next"
-                    submitBehavior="submit"
-                    onSubmitEditing={() => emailRef.current?.focus()}
-                  />
-                  <Field
-                    ref={emailRef}
-                    label="Email"
-                    value={email}
-                    onChangeText={setEmail}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    autoComplete="email"
-                    keyboardType="email-address"
-                    textContentType="emailAddress"
-                    returnKeyType="next"
-                    submitBehavior="submit"
-                    onSubmitEditing={() => passwordRef.current?.focus()}
-                  />
-                </>
-              ) : (
-                <Field
-                  label="Username or email"
-                  value={identifier}
-                  onChangeText={setIdentifier}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoComplete="username"
-                  textContentType="username"
-                  returnKeyType="next"
-                  submitBehavior="submit"
-                  onSubmitEditing={() => passwordRef.current?.focus()}
-                />
-              )}
-              <Field
-                ref={passwordRef}
-                label="Password"
-                hint={signingUp ? 'At least 8 characters' : undefined}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete={signingUp ? 'new-password' : 'current-password'}
-                textContentType={signingUp ? 'newPassword' : 'password'}
-                returnKeyType="go"
-                onSubmitEditing={submit}
+            {mode === 'welcome' ? (
+              <AuthWelcome
+                onCreateAccount={() => switchMode('signUp')}
+                onLogIn={() => switchMode('signIn')}
               />
-
-              {error && (
-                <ThemedText type="small" themeColor="error" accessibilityRole="alert">
-                  {error}
-                </ThemedText>
-              )}
-
-              <Pressable
-                onPress={submit}
-                disabled={submitting}
-                accessibilityRole="button"
-                style={({ pressed }) => [
-                  styles.button,
-                  { backgroundColor: theme.tint },
-                  (pressed || submitting) && styles.pressed,
-                ]}>
-                {submitting ? (
-                  <ActivityIndicator color={theme.onTint} />
-                ) : (
-                  <ThemedText themeColor="onTint" selectable={false} style={styles.buttonLabel}>
-                    {signingUp ? 'Create account' : 'Log in'}
+            ) : (
+              <>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => switchMode('welcome')}
+                  hitSlop={8}
+                  style={styles.backButton}
+                >
+                  <ThemedText type="smallBold" themeColor="tint">
+                    ‹ Back to welcome
                   </ThemedText>
-                )}
-              </Pressable>
-            </View>
+                </Pressable>
+
+                <View style={styles.intro}>
+                  <ThemedText type="subtitle" style={styles.centered}>
+                    {signingUp ? 'Create your player' : 'Welcome back'}
+                  </ThemedText>
+                  <ThemedText themeColor="textSecondary" style={styles.centered}>
+                    {signingUp
+                      ? 'Build your profile and start making a real-world impact.'
+                      : 'Your next neighborhood quest is waiting.'}
+                  </ThemedText>
+                </View>
+
+                <ThemedView type="backgroundElement" style={styles.segmented}>
+                  <Segment label="Log in" active={!signingUp} onPress={() => switchMode('signIn')} />
+                  <Segment label="Sign up" active={signingUp} onPress={() => switchMode('signUp')} />
+                </ThemedView>
+
+                {/* Keyed by mode so each form gets fresh inputs. Changing a live password field's
+                    autofill hints makes iOS and Safari re-run password AutoFill, which flickers. */}
+                <View key={mode} style={styles.form}>
+                  {signingUp ? (
+                    <>
+                      <Field
+                        label="Username"
+                        value={username}
+                        onChangeText={setUsername}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        autoComplete="username-new"
+                        textContentType="username"
+                        returnKeyType="next"
+                        submitBehavior="submit"
+                        onSubmitEditing={() => emailRef.current?.focus()}
+                      />
+                      <Field
+                        ref={emailRef}
+                        label="Email"
+                        value={email}
+                        onChangeText={setEmail}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        autoComplete="email"
+                        keyboardType="email-address"
+                        textContentType="emailAddress"
+                        returnKeyType="next"
+                        submitBehavior="submit"
+                        onSubmitEditing={() => passwordRef.current?.focus()}
+                      />
+                    </>
+                  ) : (
+                    <Field
+                      label="Username or email"
+                      value={identifier}
+                      onChangeText={setIdentifier}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      autoComplete="username"
+                      textContentType="username"
+                      returnKeyType="next"
+                      submitBehavior="submit"
+                      onSubmitEditing={() => passwordRef.current?.focus()}
+                    />
+                  )}
+                  <Field
+                    ref={passwordRef}
+                    label="Password"
+                    hint={signingUp ? 'At least 8 characters' : undefined}
+                    value={password}
+                    onChangeText={setPassword}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoComplete={signingUp ? 'new-password' : 'current-password'}
+                    textContentType={signingUp ? 'newPassword' : 'password'}
+                    returnKeyType="go"
+                    onSubmitEditing={submit}
+                  />
+
+                  {error && (
+                    <ThemedText type="small" themeColor="error" accessibilityRole="alert">
+                      {error}
+                    </ThemedText>
+                  )}
+
+                  <Pressable
+                    onPress={submit}
+                    disabled={submitting}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [
+                      styles.button,
+                      { backgroundColor: theme.tint },
+                      (pressed || submitting) && styles.pressed,
+                    ]}
+                  >
+                    {submitting ? (
+                      <ActivityIndicator color={theme.onTint} />
+                    ) : (
+                      <ThemedText themeColor="onTint" selectable={false} style={styles.buttonLabel}>
+                        {signingUp ? 'Create account' : 'Log in'}
+                      </ThemedText>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -254,6 +282,11 @@ const styles = StyleSheet.create({
   intro: {
     alignItems: 'center',
     gap: Spacing.two,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    justifyContent: 'center',
+    minHeight: 32,
   },
   centered: {
     textAlign: 'center',

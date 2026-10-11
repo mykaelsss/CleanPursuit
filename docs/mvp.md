@@ -74,6 +74,18 @@ The demo works end to end with these six features.
 The original "event" became a quest with one or more parties.
 A group gets credit together, and a cleanup can take several tries.
 
+### Signed-out entry
+
+- Signed-out visitors land on a mobile-first welcome screen that introduces CleanPursuit as a neighborhood cleanup adventure.
+- The welcome screen explains the core loop as spotting a quest, rallying a party and cleaning up to earn XP.
+- Large primary actions open account creation or login on the same route.
+
+### Player home
+
+- Signed-in players land on a mobile-first adventure hub that shows their total XP, current level and progress toward the next level.
+- The home screen links directly to nearby quests, quest creation and the all-time leaderboard.
+- Player progress uses the level values returned by the API and does not invent streaks, ranks or activity totals.
+
 ### Report
 
 - A user submits a photo, location and description.

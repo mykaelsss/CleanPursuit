@@ -35,6 +35,13 @@ export const Colors = {
     onInk: '#FFFFFF',
     onInkSoft: '#C5E5AE',
 
+    gamePanel: '#173B57',
+    onGamePanel: '#FFFFFF',
+    onGamePanelSoft: '#C8DFEE',
+    questAction: '#155EA6',
+    onQuestAction: '#FFFFFF',
+    questActionGlow: '#8FD3F4',
+
     earth: '#B58B62',
     border: '#CBE5BB',
 
@@ -75,6 +82,13 @@ export const Colors = {
     ink: '#2A6247',
     onInk: '#FFFFFF',
     onInkSoft: '#C5E5AE',
+
+    gamePanel: '#173B57',
+    onGamePanel: '#FFFFFF',
+    onGamePanelSoft: '#C8DFEE',
+    questAction: '#1971C2',
+    onQuestAction: '#FFFFFF',
+    questActionGlow: '#8FD3F4',
 
     earth: '#C9A37A',
     border: '#466273',
