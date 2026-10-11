@@ -152,6 +152,7 @@ Rules that live in the API, not the database:
 - Check-in needs a signed-up member, a scheduled party inside its time slot, an open quest and a location within 100 m of the report.
   The first check-in sets the party `active` and `started_at`.
 - `presence_ping.on_site` is computed with `ST_DWithin` against the quest's report location, within 100 m, and an on-site ping updates `party_member.last_on_site_at`.
+- Ending a party computes each member's time on site from `presence_ping`: the sum of the gaps between consecutive pings that were both on site, each gap at most 10 minutes, between check-in and the scheduled end.
 - Ending a party marks `signed_up` members `no_show` and `checked_in` members `left` with `party_ended`.
 - Not built yet: the first check-in on a walk-up becoming the leader, promoting the longest-present member when the leader leaves, and marking a member `left` with `geofence_timeout` after 30 minutes without an on-site ping.
 
@@ -195,8 +196,12 @@ There are no guild features in the MVP.
 
 | Table | Purpose |
 | --- | --- |
-| `activity_event` | Append-only log of everything that happened. Source for XP, leaderboards, hotspots and the dashboard. 7-day chunks, segmented by `user_id`. Primary key `(id, occurred_at)`. |
-| `presence_ping` | GPS pings from checked-in members during a party. 1-day chunks, segmented by `party_id`, dropped after 30 days for privacy. |
+| `activity_event` | Append-only log of everything that happened. Source for XP, leaderboards, hotspots and the dashboard. 7-day chunks, segmented by `user_id`, compressed after 7 days. Primary key `(id, occurred_at)`. |
+| `presence_ping` | GPS pings from checked-in members during a party; time on site for XP is computed from them. 1-day chunks, segmented by `party_id`, compressed after 1 day, dropped after 30 days for privacy. |
+
+The compression policies were not written out in `001`.
+TimescaleDB adds them because the tables are created with `tsdb.hypertable` and a `segmentby`, using the chunk interval as the delay.
+Compressed chunks still accept inserts, updates and deletes.
 
 `activity_event` kinds:
 
@@ -226,12 +231,15 @@ All aggregates are real-time (`materialized_only = false`) and bucket in UTC.
 | `area_hotspot_30d` | Plain view | `report_daily_by_area_reporter` | Always current |
 
 - XP aggregates carry `xp`, `minutes_on_site` and `parties` per user per bucket, indexed on `(bucket, xp DESC)`.
-- All-time XP is `app_user.total_xp`, and it is what the API's leaderboard ranks; the API does not read the daily, weekly or monthly aggregates yet.
+- All-time XP is `app_user.total_xp`, and the all-time leaderboard ranks it.
+- The daily, weekly and monthly leaderboards read the current UTC bucket from the matching aggregate.
+  The current week and month are never materialized yet, so their rows are rolled up from `xp_daily_by_user` when read.
+  The API filters on a range of fixed timestamps rather than `bucket = time_bucket(..., now())`, so TimescaleDB pushes the filter down to the bucket index.
 - A user's level is derived from `total_xp` in the API and is not stored (see [Levels](mvp.md#levels)).
 - `area_hotspot_30d` returns `distinct_reporters`, `reports` and `last_reported_day` per `area_id` for the last 30 days.
 - The heat map and the hotspot bonus use `distinct_reporters`, so one person re-reporting a spot cannot heat it up alone.
 - The bonus threshold lives in the API: 3 or more distinct reporters.
-- The dashboard groups areas with `h3_cell_to_parent(area_id, 7)` instead of a neighborhoods table.
+- The planned dashboard will group areas with `h3_cell_to_parent(area_id, 7)` instead of a neighborhoods table.
 
 Refresh policies only look back a few days.
 After backfilling seed data, refresh the full range by hand, daily first:
@@ -246,7 +254,7 @@ CALL refresh_continuous_aggregate('report_daily_by_area_reporter', NULL, NULL);
 ## Open items
 
 - Seed a few months of backdated demo data for one region, plus hand-verified drop-offs.
-- Add a dashboard aggregate; it needs `area_id` on party events.
+- Add a dashboard aggregate; every party event already carries `area_id`.
 - Drop `report.estimated_bag_count` once no deployed code reads it (kept in 004 so older branches still work on DEV).
 - Clean up R2 objects that were uploaded but never confirmed, and `file` rows that were never attached to anything.
 - Guild leaderboard, later.

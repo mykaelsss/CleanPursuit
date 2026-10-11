@@ -13,7 +13,7 @@ It is being built for the 48-hour Hack Knight hackathon.
    Members check in by GPS during the time slot.
 4. **End the party.** The party leader submits an after photo, a bag count and whether the cleanup is done.
 5. **Earn XP.** Everyone who checked in gets up to 100 XP, based on how much of the time slot they were on site, with a bonus for hotspots.
-   XP feeds the all-time leaderboard.
+   XP feeds daily, weekly, monthly and all-time leaderboards.
 
 Reports flagged for sharps or biohazards show warnings and nearby drop-off locations instead of handling instructions.
 
@@ -25,7 +25,7 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 | --- | --- |
 | Database | Migrations 001 to 007 applied to the DEV Tiger Data service (005 is on the `biohazard-dropoffs` branch) |
 | App | Expo starter project in `app/` |
-| API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports, quests, events and parties, XP, the all-time leaderboard, hotspots, equipment and drop-offs |
+| API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports, quests, events and parties, XP, leaderboards, hotspots, equipment and drop-offs |
 
 ## Tech stack
 
@@ -224,7 +224,8 @@ Two sets of routes create scheduled parties, and both make the same `party` rows
   It works only between the scheduled start and end, within 100 m of the report location.
   The first check-in makes the party active.
 - `POST /parties/{id}/presence` with `location` records a GPS ping for a checked-in member of an active party.
-  Pings within 100 m move the member's last on-site time forward.
+  Pings within 100 m are on site, and time on site for XP is measured between on-site pings.
+  The app should ping about once a minute during a party, since one gap counts for at most 10 minutes.
 - `POST /parties/{id}/end` lets the leader end an active scheduled party with `afterPhotoFileId`, `bagCount` and `outcome` (`completed` or `partial`).
   The after photo must be the leader's own confirmed upload and not attached to anything else.
   `completed` closes the quest; `partial` leaves it open.
@@ -235,8 +236,11 @@ Ending a party awards XP to members who checked in; see [XP](docs/mvp.md#xp).
 
 ## Leaderboards and hotspots
 
-- `GET /leaderboards?limit=` ranks users by all-time XP, 20 by default and at most 100.
-  Ties share a rank.
+- `GET /leaderboards?period=&limit=` ranks users by XP earned in a period: `day`, `week`, `month` or `all` (the default).
+  Days, weeks and months are the current UTC ones, weeks start on Monday, and `periodStart` says when the period began.
+  Each entry has `xp` for the period and `totalXp` for all time.
+  Users with no XP in the period are left out, and ties share a rank.
+  It returns 20 entries by default and at most 100.
 - `GET /hotspots?limit=` lists H3 areas reported in the last 30 days with their center point, distinct reporters and report count, busiest first.
   It returns 100 areas by default and at most 250.
   `isHotspot` is true when 3 or more different people reported the area, which is when cleaning it earns bonus XP.
