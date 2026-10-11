@@ -6,8 +6,10 @@ import { perUserRateLimit } from "../lib/rate-limit.ts";
 import { geographyPoint, locationSchema } from "../lib/geo.ts";
 
 const security = [{ bearerAuth: [] }];
-// Temporary MVP value; revisit after end-to-end demo testing.
+// Temporary MVP values; revisit after end-to-end demo testing.
 const CHECK_IN_GEOFENCE_RADIUS_METERS = 100;
+// The most time one gap between two on-site pings can count toward time on site.
+const PRESENCE_MAX_GAP_MINUTES = 10;
 
 const partyStatusSchema = z.enum([
 	"scheduled",
@@ -748,25 +750,61 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					);
 				}
 
-				// Lock memberships and capture the last verified on-site timestamp.
+				// Lock memberships before reading presence and awarding XP.
 				const membersResult = await client.query<{
 					user_id: string;
 					status: string;
 					checked_in_at: Date | null;
-					last_on_site_at: Date | null;
 					guild_id: string | null;
 				}>(
 					`SELECT
              pm.user_id,
              pm.status,
              pm.checked_in_at,
-             pm.last_on_site_at,
              gm.guild_id
            FROM party_member pm
            LEFT JOIN guild_member gm ON gm.user_id = pm.user_id
            WHERE pm.party_id = $1
            FOR UPDATE OF pm`,
 					[partyId],
+				);
+
+				// Time on site is the sum of the gaps between consecutive pings that were
+				// both on site, each gap counting at most PRESENCE_MAX_GAP_MINUTES. Time
+				// before check-in, after the scheduled end, or after this party-ending
+				// operation never counts, and time spent off site between pings is dropped.
+				const countUntil = new Date(
+					Math.min(party.scheduled_end.getTime(), endedAt.getTime()),
+				);
+				const presenceResult = await client.query<{
+					user_id: string;
+					minutes_on_site: number;
+				}>(
+					`SELECT
+             p.user_id,
+             floor(sum(extract(epoch FROM greatest(
+               least(p.next_recorded_at, $2::timestamptz, p.recorded_at + make_interval(mins => $3))
+                 - greatest(p.recorded_at, pm.checked_in_at),
+               interval '0'
+             ))) / 60)::int AS minutes_on_site
+           FROM (
+             SELECT
+               user_id,
+               recorded_at,
+               on_site,
+               lead(recorded_at) OVER w AS next_recorded_at,
+               lead(on_site) OVER w AS next_on_site
+             FROM presence_ping
+             WHERE party_id = $1
+             WINDOW w AS (PARTITION BY user_id ORDER BY recorded_at)
+           ) p
+           JOIN party_member pm ON pm.party_id = $1 AND pm.user_id = p.user_id
+           WHERE p.on_site AND p.next_on_site AND p.recorded_at < $2
+           GROUP BY p.user_id`,
+					[partyId, countUntil, PRESENCE_MAX_GAP_MINUTES],
+				);
+				const minutesOnSiteByUser = new Map(
+					presenceResult.rows.map((row) => [row.user_id, row.minutes_on_site]),
 				);
 
 				const durationMinutes = Math.min(
@@ -788,23 +826,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 							(member.status === "checked_in" || member.status === "left"),
 					)
 					.map((member) => {
-						// Time on site ends at the last verified on-site ping. Never
-						// count time before check-in, after the scheduled end, or after
-						// this party-ending operation.
-						const lastOnSiteAt =
-							member.last_on_site_at ?? member.checked_in_at!;
-						const cappedEnd = Math.min(
-							lastOnSiteAt.getTime(),
-							party.scheduled_end!.getTime(),
-							endedAt.getTime(),
-						);
-
-						const minutesOnSite = Math.max(
-							0,
-							Math.floor(
-								(cappedEnd - member.checked_in_at!.getTime()) / 60_000,
-							),
-						);
+						const minutesOnSite = minutesOnSiteByUser.get(member.user_id) ?? 0;
 
 						const xp = Math.floor(
 							(100 * Math.min(minutesOnSite, durationMinutes)) /

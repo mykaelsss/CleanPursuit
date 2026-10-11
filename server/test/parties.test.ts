@@ -96,6 +96,43 @@ function randomSpot() {
   };
 }
 
+// Replaces a member's pings with ones the given number of minutes ago and backdates
+// their check-in to the first ping, so time on site is deterministic without waiting.
+async function setPings(
+  pool: ReturnType<typeof createPool>,
+  partyId: string,
+  userId: string,
+  spot: { latitude: number; longitude: number },
+  pings: Array<{ minutesAgo: number; onSite: boolean }>,
+) {
+  await pool.query(
+    'DELETE FROM presence_ping WHERE party_id = $1 AND user_id = $2',
+    [partyId, userId],
+  );
+  await pool.query(
+    `WITH anchor AS (SELECT clock_timestamp() AS now),
+     inserted AS (
+       INSERT INTO presence_ping (party_id, user_id, recorded_at, location, on_site)
+       SELECT $1, $2, anchor.now - make_interval(mins => p.minutes_ago),
+              ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, p.on_site
+       FROM anchor, unnest($5::int[], $6::boolean[]) AS p(minutes_ago, on_site)
+       RETURNING recorded_at, on_site
+     )
+     UPDATE party_member
+     SET checked_in_at = (SELECT min(recorded_at) FROM inserted),
+         last_on_site_at = (SELECT max(recorded_at) FROM inserted WHERE on_site)
+     WHERE party_id = $1 AND user_id = $2`,
+    [
+      partyId,
+      userId,
+      spot.longitude,
+      spot.latitude,
+      pings.map((ping) => ping.minutesAgo),
+      pings.map((ping) => ping.onSite),
+    ],
+  );
+}
+
 async function createQuest(
   app: App,
   storage: FakeStorage,
@@ -410,15 +447,11 @@ describe('parties', { skip }, () => {
     assert.equal(forbiddenEnd.statusCode, 403);
     assert.equal(forbiddenEnd.json().code, 'PARTY_LEADER_REQUIRED');
 
-    // Set deterministic on-site timestamps for XP calculation:
-    // 1 minute on site in a 10-minute scheduled event should earn 10 XP.
-    await pool.query(
-      `UPDATE party_member
-       SET checked_in_at = statement_timestamp() - interval '2 minutes',
-           last_on_site_at = statement_timestamp() - interval '1 minute'
-       WHERE party_id = $1 AND user_id = $2`,
-      [partyId, leader.userId],
-    );
+    // 1 minute between two on-site pings in a 10-minute scheduled event earns 10 XP.
+    await setPings(pool, partyId, leader.userId, spot, [
+      { minutesAgo: 2, onSite: true },
+      { minutesAgo: 1, onSite: true },
+    ]);
 
     const endRequest = () =>
       app.inject({
@@ -597,15 +630,11 @@ describe('parties', { skip }, () => {
       leader.authorization,
     );
 
-    // Backdate the confirmed check-in for a deterministic 9-minute base
-    // award, without waiting nine real minutes during the test.
-    await pool.query(
-      `UPDATE party_member
-       SET checked_in_at = clock_timestamp() - interval '9 minutes',
-           last_on_site_at = clock_timestamp()
-       WHERE party_id = $1 AND user_id = $2`,
-      [partyId, leader.userId],
-    );
+    // 9 minutes between two on-site pings earns a 90 XP base award.
+    await setPings(pool, partyId, leader.userId, spot, [
+      { minutesAgo: 9, onSite: true },
+      { minutesAgo: 0, onSite: true },
+    ]);
 
     const end = await app.inject({
       method: 'POST',
@@ -714,15 +743,11 @@ describe('parties', { skip }, () => {
     const pool = createPool(env.DATABASE_URL);
     t.after(() => pool.end());
 
-    // Make the eligible time deterministic: 1 minute on-site during a
-    // 10-minute scheduled event should award 10 XP.
-    await pool.query(
-      `UPDATE party_member
-       SET checked_in_at = statement_timestamp() - interval '2 minutes',
-           last_on_site_at = statement_timestamp() - interval '1 minute'
-       WHERE party_id = $1 AND user_id = $2`,
-      [partyId, leader.userId],
-    );
+    // 1 minute between two on-site pings in a 10-minute scheduled event earns 10 XP.
+    await setPings(pool, partyId, leader.userId, spot, [
+      { minutesAgo: 2, onSite: true },
+      { minutesAgo: 1, onSite: true },
+    ]);
 
     const end = await app.inject({
       method: 'POST',
@@ -771,6 +796,65 @@ describe('parties', { skip }, () => {
     assert.equal(state.rows[0].awarded_xp, 10);
   });
 
+
+  test('time on site counts only gaps between on-site pings, each up to 10 minutes', async (t) => {
+    const { app, storage } = await startApp(t);
+    const leader = await signUp(app);
+    const spot = randomSpot();
+
+    const questId = await createQuest(app, storage, leader.authorization, spot);
+    const { partyId, scheduledStart } = await createScheduledParty(
+      app,
+      leader.authorization,
+      questId,
+    );
+
+    const waitMs = Math.max(0, scheduledStart.getTime() - Date.now() + 25);
+    await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+
+    const checkIn = await app.inject({
+      method: 'POST',
+      url: `/parties/${partyId}/check-in`,
+      headers: { authorization: leader.authorization },
+      payload: { location: spot },
+    });
+    assert.equal(checkIn.statusCode, 200);
+
+    const afterPhotoFileId = await uploadPhoto(app, storage, leader.authorization);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    // 24 -> 12: a 12-minute gap between on-site pings counts as 10.
+    // 12 -> 11 -> 10: the member was off site at 11, so neither gap counts.
+    // 10 -> 9: 1 minute. 9 is the last ping, so nothing after it counts.
+    await setPings(pool, partyId, leader.userId, spot, [
+      { minutesAgo: 24, onSite: true },
+      { minutesAgo: 12, onSite: true },
+      { minutesAgo: 11, onSite: false },
+      { minutesAgo: 10, onSite: true },
+      { minutesAgo: 9, onSite: true },
+    ]);
+
+    const end = await app.inject({
+      method: 'POST',
+      url: `/parties/${partyId}/end`,
+      headers: { authorization: leader.authorization },
+      payload: { afterPhotoFileId, bagCount: 1, outcome: 'partial' },
+    });
+    assert.equal(end.statusCode, 200);
+
+    const award = await pool.query(
+      `SELECT xp, minutes_on_site FROM activity_event
+       WHERE party_id = $1 AND user_id = $2 AND kind = 'party_xp_awarded'`,
+      [partyId, leader.userId],
+    );
+
+    assert.equal(award.rowCount, 1);
+    assert.equal(award.rows[0].minutes_on_site, 11);
+    // XP counts at most the 10-minute time slot.
+    assert.equal(award.rows[0].xp, 100);
+  });
 
   test('party ending rejects another user’s photo and prevents photo reuse', async (t) => {
     const { app, storage } = await startApp(t);

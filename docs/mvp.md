@@ -169,8 +169,11 @@ Handing off, promotion and abandoning a party are not.
 - Check-in and on-site pings use a 100 m geofence around the report location.
   The number is a temporary MVP value, to revisit after end-to-end demo testing.
 - The first check-in makes the party active.
-- The app sends location pings during the party, and each on-site ping moves the member's last on-site time forward.
-- Time on site runs from check-in to the member's last on-site ping, stopping at the scheduled end.
+- The app sends location pings during the party, about once a minute.
+- Time on site adds up the gaps between consecutive pings that were both on site.
+  A gap with an off-site ping at either end does not count, and one gap counts for at most 10 minutes, so stepping away or dropping signal does not earn time.
+  Nothing counts before check-in or after the scheduled end.
+  The 10-minute limit is a temporary MVP value, to revisit with the ping rate after demo testing.
 - Removing a member after 30 minutes without an on-site ping is not built yet.
 - Pings are deleted after 30 days.
 
@@ -210,7 +213,7 @@ stateDiagram-v2
 - XP does not scale with the difficulty tier yet.
 - A member earns at most 100 XP per party, hotspot bonus included.
 - Cleaning a hotspot adds bonus XP when the outcome is completed.
-- XP feeds daily, weekly and monthly aggregates plus each user's all-time total; the API serves the all-time leaderboard only.
+- XP feeds daily, weekly and monthly aggregates plus each user's all-time total, and the API serves a leaderboard for each.
 
 | Rule | Value |
 | --- | --- |
@@ -261,9 +264,11 @@ XP keeps counting past level 15 for the leaderboards.
 
 - **Activity log.** One append-only hypertable records reports, check-ins, party ends, XP and bonuses, with `user_id`, `guild_id` and `area_id` on every row.
 - **Presence pings.** A second hypertable stores GPS pings with a 30-day retention policy.
-- **Leaderboards.** A daily continuous aggregate, with weekly and monthly rolled up from it. All-time XP is a column on the user.
-- **Hotspots.** A continuous aggregate counts reports per area and reporter; a 30-day view counts distinct reporters.
-- **Dashboard.** Cleanups per week, bags collected, volunteer-hours, active volunteers and re-report rate, grouped by larger H3 cells instead of neighborhoods.
+  Time on site for XP is computed from these pings when a party ends.
+- **Compression.** Both hypertables move older chunks to compressed columnar storage: activity after 7 days and pings after 1 day.
+- **Leaderboards.** A daily continuous aggregate, with weekly and monthly rolled up from it, serves the daily, weekly and monthly leaderboards. All-time XP is a column on the user.
+- **Hotspots.** A continuous aggregate counts reports per area and reporter; a 30-day view counts distinct reporters for the hotspot map and the hotspot bonus.
+- **Dashboard (not built yet).** Cleanups per week, bags collected, volunteer-hours, active volunteers and re-report rate, grouped by larger H3 cells instead of neighborhoods.
 - **Geospatial.** PostGIS `geography`, GiST indexes and `ST_DWithin` for "near me" and the check-in geofence.
 
 Aggregates are real-time and the daily ones refresh every 5 minutes, so the demo never lags.
@@ -311,7 +316,7 @@ The core loop ships first so there is always a working demo.
 1. Set up the project, the Tiger Data schema and the activity-log hypertable with area snapping. (Done)
 2. Report and quest creation, with photo upload. (API done)
 3. Map and list views, plus party sign-up and check-in. (Scheduled parties done in the API)
-4. Ending a party with bag count and after photo, then XP and the leaderboard. (Scheduled parties and the all-time leaderboard done in the API)
+4. Ending a party with bag count and after photo, then XP and the leaderboard. (Scheduled parties and leaderboards done in the API)
 5. Gemini photo analysis, the tier rules and the equipment lookup. (Done in the API)
 6. Hotspot aggregate and bonus XP. (Done in the API)
 7. Biohazard drop-off map with directions links, and the resources page. (Drop-off lookup done in the API)
@@ -334,7 +339,7 @@ The core loop ships first so there is always a working demo.
 Done:
 
 - Schema migrations `001` to `007` are applied to the DEV Tiger service and tested (`005` is on the `biohazard-dropoffs` branch).
-- API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, quests, events and scheduled parties with GPS check-in and presence, ending a party with XP and the hotspot bonus, the all-time leaderboard, hotspots, equipment and drop-offs.
+- API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, quests, events and scheduled parties with GPS check-in and presence, ending a party with XP from presence pings and the hotspot bonus, daily, weekly, monthly and all-time leaderboards, hotspots, equipment and drop-offs.
 
 Open:
 
@@ -344,7 +349,7 @@ Open:
 - [x] Geofence radius for check-in and on-site pings: 100 m for now.
 - [ ] One set of routes for scheduling and joining parties (`/events` and `/parties` overlap).
 - [ ] Walk-up parties, leader handoff, the 30-minute presence timeout, and abandoned and cancelled outcomes.
-- [ ] Daily, weekly and monthly leaderboards in the API.
+- [x] Daily, weekly and monthly leaderboards in the API.
 - [ ] Demo region, for seed data and drop-off locations.
 - [x] Gear seed data for the equipment lookup.
 - [ ] Backdated demo data.
