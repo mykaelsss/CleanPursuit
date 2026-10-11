@@ -1,0 +1,54 @@
+export type Meridiem = 'AM' | 'PM';
+
+export type TimeValue = {
+  hour: string;
+  minute: string;
+  meridiem: Meridiem;
+};
+
+export type ScheduleValue = {
+  date: Date;
+  start: TimeValue;
+  end: TimeValue;
+};
+
+export function createInitialSchedule(): ScheduleValue {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + 1);
+  return {
+    date,
+    start: { hour: '10', minute: '00', meridiem: 'AM' },
+    end: { hour: '12', minute: '00', meridiem: 'PM' },
+  };
+}
+
+export function formatTime(time: TimeValue) {
+  return `${time.hour || '--'}:${time.minute ? time.minute.padStart(2, '0') : '--'} ${time.meridiem}`;
+}
+
+export function isValidTime(time: TimeValue) {
+  const hour = Number(time.hour);
+  const minute = Number(time.minute);
+  return (
+    time.hour.length > 0 &&
+    time.minute.length > 0 &&
+    hour >= 1 &&
+    hour <= 12 &&
+    minute >= 0 &&
+    minute <= 59
+  );
+}
+
+export function isEndLater(start: TimeValue, end: TimeValue) {
+  return isValidTime(start) && isValidTime(end) && timeInMinutes(end) > timeInMinutes(start);
+}
+
+export function isValidSchedule(schedule: ScheduleValue) {
+  return isEndLater(schedule.start, schedule.end);
+}
+
+function timeInMinutes(time: TimeValue) {
+  const hour24 = (Number(time.hour) % 12) + (time.meridiem === 'PM' ? 12 : 0);
+  return hour24 * 60 + Number(time.minute);
+}

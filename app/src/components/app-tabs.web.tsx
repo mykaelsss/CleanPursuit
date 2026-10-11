@@ -32,6 +32,10 @@ export default function AppTabs() {
             <TabButton>Quests</TabButton>
           </TabTrigger>
 
+          <TabTrigger name="create" href="/create" asChild>
+            <TabButton>Create</TabButton>
+          </TabTrigger>
+
           <TabTrigger name="profile" href="/profile" asChild>
             <TabButton>Profile</TabButton>
           </TabTrigger>
