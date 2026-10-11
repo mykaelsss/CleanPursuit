@@ -9,6 +9,7 @@ import { geographyPoint, locationSchema, placeNameSchema, selectLocation } from 
 import { perUserRateLimit } from '../lib/rate-limit.ts';
 import type { Storage } from '../lib/storage.ts';
 import { userSummarySchema } from '../lib/users.ts';
+import { toWalkUp, WALK_UP_COLUMNS, WALK_UP_JOIN, type WalkUpRow, walkUpSchema } from '../lib/walk-ups.ts';
 import { TIER_MAX_XP } from '../lib/xp.ts';
 
 // An event is a scheduled party: one attempt at a quest, with a time slot and an organizer (the leader).
@@ -34,6 +35,7 @@ const eventSchema = z.object({
   attendeeCount: z.number().int().describe('Signed-up and checked-in members, including the organizer'),
   joined: z.boolean().describe('Whether the signed-in user is attending'),
   isOrganizer: z.boolean(),
+  walkUp: walkUpSchema.describe("A walk-up cleanup under way on the event's quest, which anyone at the spot can join now"),
 });
 
 const eventSummarySchema = eventSchema.extend({
@@ -65,16 +67,18 @@ const EVENT_COLUMNS = `
   (SELECT count(*)::integer FROM party_member m
    WHERE m.party_id = p.id AND m.status IN ${ATTENDING}) AS attendee_count,
   EXISTS (SELECT 1 FROM party_member m
-          WHERE m.party_id = p.id AND m.user_id = $1 AND m.status IN ${ATTENDING}) AS joined`;
+          WHERE m.party_id = p.id AND m.user_id = $1 AND m.status IN ${ATTENDING}) AS joined,
+  ${WALK_UP_COLUMNS}`;
 
 const EVENT_FROM = `
   FROM party p
   JOIN quest q ON q.id = p.quest_id
   JOIN report r ON r.id = q.report_id
   JOIN file f ON f.id = r.photo_file_id
-  JOIN app_user u ON u.id = p.leader_user_id`;
+  JOIN app_user u ON u.id = p.leader_user_id
+  ${WALK_UP_JOIN}`;
 
-interface EventRow {
+interface EventRow extends WalkUpRow {
   id: string;
   quest_id: string;
   leader_user_id: string;
@@ -114,6 +118,7 @@ async function toEvent(row: EventRow, userId: string, storage: Storage): Promise
     attendeeCount: row.attendee_count,
     joined: row.joined,
     isOrganizer: row.leader_user_id === userId,
+    walkUp: toWalkUp(row),
   };
 }
 

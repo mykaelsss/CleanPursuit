@@ -183,9 +183,11 @@ Bounty rules:
   A quest has at most one walk-up under way.
 - People come and go as they like while the walk-up is under way.
   A member can leave with `POST /parties/{id}/leave` and check in again later, keeping their first check-in time.
+- A person is in at most one walk-up at a time, so checking in to another quest's walk-up leaves the first one.
+  `GET /me/walk-up` returns the walk-up the signed-in user is checked in to, so the app can keep sending location pings after it restarts.
 - A walk-up can start at any time, including before a scheduled event on the same quest.
   If it completes the quest, the quest's events that have not started are cancelled.
-- Each quest shows its walk-up under way, with the leader and how many members are on site, or none.
+- Each quest and event shows its quest's walk-up under way, with the leader and how many members are on site, or none.
 - A walk-up that nobody is still at is abandoned without XP, and the next check-in starts a new one.
 - The leader ends a walk-up the same way as an event.
   After a partial cleanup the quest stays open for the next walk-up or event.

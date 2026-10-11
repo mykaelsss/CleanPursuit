@@ -161,8 +161,9 @@ Rules that live in the API, not the database:
 - Walk-up check-in (`POST /quests/{id}/walk-up`) needs only an open quest and a location within 100 m.
   It locks the quest row, so concurrent first check-ins start one walk-up, and either joins the active walk-up or inserts a new `active` party with the caller as leader and member.
   A member who `left` checks in again by returning to `checked_in` with `left_at` and `left_reason` cleared, keeping `checked_in_at`.
+  Before joining, the caller leaves (`voluntary`) any other active walk-up they are `checked_in` to, with the usual handoff or abandoning, so time on site is never counted twice.
 - A walk-up member whose `last_on_site_at` (or `checked_in_at`) is more than 30 minutes old becomes `left` with `geofence_timeout`, and `left_at` is their last on-site time.
-  The API applies this lazily, in its own transaction, before walk-up check-in, presence pings, leaving and ending, and quest responses ignore those members until then.
+  The API applies this lazily, in its own transaction, before walk-up check-in, presence pings, leaving, ending and reading a party (`GET /parties/{id}`, `GET /me/walk-up`), and quest and event responses ignore those members until then.
 - When a walk-up's leader is no longer `checked_in`, `leader_user_id` moves to the `checked_in` member with the earliest `checked_in_at`.
   With nobody `checked_in`, the walk-up becomes `abandoned` with `ended_at` set to the last member's `left_at`.
 - `presence_ping.on_site` is computed with `ST_DWithin` against the quest's report location, within 100 m, and an on-site ping updates `party_member.last_on_site_at`.

@@ -1210,6 +1210,59 @@ describe('parties', { skip }, () => {
     assert.equal(abandoned.json().status, 'abandoned');
   });
 
+  test('checking in to another walk-up leaves the first, and /me/walk-up follows the caller', async (t) => {
+    const { app, storage } = await startApp(t);
+    const user = await signUp(app);
+    const other = await signUp(app);
+    const spotA = randomSpot();
+    const spotB = randomSpot();
+    const questA = await createQuest(app, storage, user.authorization, spotA);
+    const questB = await createQuest(app, storage, user.authorization, spotB);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const mine = () =>
+      app.inject({ method: 'GET', url: '/me/walk-up', headers: { authorization: user.authorization } });
+
+    assert.equal((await mine()).json().party, null);
+
+    const a = await walkUp(app, user.authorization, questA, spotA);
+    assert.equal(a.statusCode, 200);
+    assert.equal((await mine()).json().party.id, a.json().id);
+
+    // Someone else keeps walk-up A going after the user moves on.
+    assert.equal((await walkUp(app, other.authorization, questA, spotA)).statusCode, 200);
+
+    // Quest B has an event later; a walk-up on it shows on the event too.
+    const { partyId: eventId } = await createScheduledParty(app, other.authorization, questB);
+    const b = await walkUp(app, user.authorization, questB, spotB);
+    assert.equal(b.statusCode, 200);
+    assert.equal((await mine()).json().party.id, b.json().id);
+
+    const event = await app.inject({
+      method: 'GET',
+      url: `/events/${eventId}`,
+      headers: { authorization: other.authorization },
+    });
+    assert.equal(event.statusCode, 200);
+    assert.equal(event.json().walkUp.partyId, b.json().id);
+    assert.equal(event.json().walkUp.checkedInCount, 1);
+
+    const left = await app.inject({
+      method: 'GET',
+      url: `/parties/${a.json().id}`,
+      headers: { authorization: user.authorization },
+    });
+    assert.equal(memberOf(left.json(), user.userId)?.status, 'left');
+    assert.equal(left.json().status, 'active');
+    assert.equal(left.json().leader.id, other.userId);
+
+    // After the timeout, the user is no longer in walk-up B.
+    await setPings(pool, b.json().id, user.userId, spotB, [{ minutesAgo: 31, onSite: true }]);
+    assert.equal((await mine()).json().party, null);
+  });
+
   test('leaving a scheduled party is refused', async (t) => {
     const { app, storage } = await startApp(t);
     const leader = await signUp(app);

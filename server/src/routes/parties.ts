@@ -202,6 +202,37 @@ async function handOffOrAbandon(client: pg.PoolClient, partyId: string) {
 	);
 }
 
+// Marks a checked-in member of a locked walk-up as having left by choice, then hands
+// off or abandons the walk-up. Returns false when the member was not checked in.
+async function leaveLockedWalkUp(
+	client: pg.PoolClient,
+	party: { id: string; questId: string; areaId: string },
+	userId: string,
+): Promise<boolean> {
+	const left = await client.query(
+		`UPDATE party_member
+     SET status = 'left',
+         left_at = now(),
+         left_reason = 'voluntary'
+     WHERE party_id = $1 AND user_id = $2 AND status = 'checked_in'`,
+		[party.id, userId],
+	);
+
+	if (left.rowCount === 0) return false;
+
+	await client.query(
+		`INSERT INTO activity_event
+       (kind, user_id, guild_id, area_id, quest_id, party_id)
+     SELECT 'party_left', $1, gm.guild_id, $2::h3index, $3, $4
+     FROM (SELECT 1) one
+     LEFT JOIN guild_member gm ON gm.user_id = $1`,
+		[userId, party.areaId, party.questId, party.id],
+	);
+
+	await handOffOrAbandon(client, party.id);
+	return true;
+}
+
 // Settles a live walk-up in its own transaction, so timeouts and handoffs stand
 // even when the request that noticed them is then rejected. Other parties are untouched.
 async function settleWalkUp(db: pg.Pool, partyId: string) {
@@ -394,7 +425,8 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 				summary: "Check in to a quest's walk-up cleanup",
 				description:
 					"Joins the walk-up party under way on the quest, or starts one with the signed-in user as its leader. " +
-					"Checking in again refreshes presence, and a member who left can check in again while the walk-up is under way.",
+					"Checking in again refreshes presence, and a member who left can check in again while the walk-up is under way. " +
+					"Checking in leaves any other walk-up the signed-in user is in.",
 				security,
 				params: z.object({ questId: z.uuid() }),
 				body: z.object({ location: locationSchema }),
@@ -455,6 +487,36 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 						403,
 						"CHECK_IN_OUTSIDE_GEOFENCE",
 						"You must be at the cleanup location to check in",
+					);
+				}
+
+				// One walk-up at a time: checking in here leaves any other walk-up,
+				// so time on site is never counted twice.
+				const elsewhere = await client.query<{
+					id: string;
+					quest_id: string;
+					area_id: string;
+				}>(
+					`SELECT p.id, p.quest_id, r.area_id::text AS area_id
+           FROM party p
+           JOIN party_member m ON m.party_id = p.id
+           JOIN quest q ON q.id = p.quest_id
+           JOIN report r ON r.id = q.report_id
+           WHERE m.user_id = $1
+             AND m.status = 'checked_in'
+             AND p.status = 'active'
+             AND p.scheduled_start IS NULL
+             AND p.quest_id <> $2
+           ORDER BY p.id
+           FOR UPDATE OF p`,
+					[userId, questId],
+				);
+
+				for (const other of elsewhere.rows) {
+					await leaveLockedWalkUp(
+						client,
+						{ id: other.id, questId: other.quest_id, areaId: other.area_id },
+						userId,
 					);
 				}
 
@@ -634,33 +696,19 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					);
 				}
 
-				const left = await client.query(
-					`UPDATE party_member
-           SET status = 'left',
-               left_at = now(),
-               left_reason = 'voluntary'
-           WHERE party_id = $1 AND user_id = $2 AND status = 'checked_in'`,
-					[partyId, userId],
+				const left = await leaveLockedWalkUp(
+					client,
+					{ id: partyId, questId: party.quest_id, areaId: party.area_id },
+					userId,
 				);
 
-				if (left.rowCount === 0) {
+				if (!left) {
 					throw new HttpError(
 						409,
 						"MEMBER_NOT_CHECKED_IN",
 						"You are not checked in to this walk-up",
 					);
 				}
-
-				await client.query(
-					`INSERT INTO activity_event
-             (kind, user_id, guild_id, area_id, quest_id, party_id)
-           SELECT 'party_left', $1, gm.guild_id, $2::h3index, $3, $4
-           FROM (SELECT 1) one
-           LEFT JOIN guild_member gm ON gm.user_id = $1`,
-					[userId, party.area_id, party.quest_id, partyId],
-				);
-
-				await handOffOrAbandon(client, partyId);
 			});
 
 			const party = await findParty(app, partyId);
@@ -1410,6 +1458,51 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 		},
 	);
 
+	// The walk-up the signed-in user is checked in to, so the app can keep sending
+	// location pings after it restarts.
+	app.get(
+		"/me/walk-up",
+		{
+			onRequest: app.authenticate,
+			schema: {
+				tags: ["parties"],
+				summary: "Get the walk-up cleanup you are checked in to",
+				description:
+					"Applies the presence timeout first, so a member who has been away too long gets null.",
+				security,
+				response: {
+					200: z.object({ party: partySchema.nullable() }),
+					401: errorSchema,
+				},
+			},
+		},
+		async (request) => {
+			const findLive = async () => {
+				const { rows } = await app.db.query<{ id: string }>(
+					`SELECT p.id
+           FROM party p
+           JOIN party_member m ON m.party_id = p.id
+           WHERE m.user_id = $1
+             AND m.status = 'checked_in'
+             AND p.status = 'active'
+             AND p.scheduled_start IS NULL
+           ORDER BY m.checked_in_at DESC, p.id
+           LIMIT 1`,
+					[request.user.id],
+				);
+				return rows[0]?.id ?? null;
+			};
+
+			const candidate = await findLive();
+			if (!candidate) return { party: null };
+
+			await settleWalkUp(app.db, candidate);
+
+			const partyId = await findLive();
+			return { party: partyId ? await findParty(app, partyId) : null };
+		},
+	);
+
 	app.get(
 		"/parties/:partyId",
 		{
@@ -1428,6 +1521,8 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			},
 		},
 		async (request) => {
+			// So members who walked away from a walk-up show as having left.
+			await settleWalkUp(app.db, request.params.partyId);
 			const party = await findParty(app, request.params.partyId);
 			if (!party)
 				throw new HttpError(404, "PARTY_NOT_FOUND", "Party not found");
