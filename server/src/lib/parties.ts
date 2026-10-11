@@ -57,6 +57,7 @@ export async function handOffOrAbandon(client: pg.PoolClient, partyId: string) {
              (SELECT max(left_at) FROM party_member WHERE party_id = p.id)
            )
        WHERE p.id = $1
+         AND p.status = 'active'
          AND (p.scheduled_end IS NULL OR p.scheduled_end <= now())`,
       [partyId],
     );
@@ -67,6 +68,7 @@ export async function handOffOrAbandon(client: pg.PoolClient, partyId: string) {
     `UPDATE party p
      SET leader_user_id = $2
      WHERE p.id = $1
+       AND p.status = 'active'
        AND EXISTS (
          SELECT 1 FROM party_member m
          WHERE m.party_id = p.id

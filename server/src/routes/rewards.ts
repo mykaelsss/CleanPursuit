@@ -20,7 +20,7 @@ const rewardSchema = z.object({
   endedAt: z.iso.datetime(),
   bagCount: z.number().int(),
   minutesOnSite: z.number().int(),
-  baseXp: z.number().int().describe('XP for time on site'),
+  baseXp: z.number().int().describe('Time-based XP with a difficulty-tier minimum'),
   bonusXp: z.number().int().describe('Hotspot bonus'),
   xp: z.number().int().describe('baseXp plus bonusXp'),
 });

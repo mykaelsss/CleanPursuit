@@ -284,7 +284,8 @@ stateDiagram-v2
 
 - XP is awarded once per party, when the leader ends it with an after photo.
 - Only members who checked in earn XP, including people who left early.
-- Each member's XP is based on how much of the time slot they were on site.
+- Every checked-in member earns a difficulty-tier minimum when the party ends with an after photo, including quick cleanups with zero full minutes between pings.
+- Time on site earns more XP once its time-based award exceeds that minimum.
 - XP scales with the quest's difficulty tier.
 - A member earns at most the tier maximum per party, hotspot bonus included.
 - Cleaning a hotspot adds bonus XP when the outcome is completed.
@@ -293,12 +294,13 @@ stateDiagram-v2
 | Rule | Value |
 | --- | --- |
 | Tier maximum | Easy 100, medium 150, hard 200, legendary 300 |
+| Tier minimum | Easy 25, medium 40, hard 50, legendary 75; applies to completed and partial parties |
 | Time slot used | For an event, the scheduled length in whole minutes, at least 1 and at most 100; for a walk-up, 60 minutes |
-| Base XP | Tier maximum x minutes on site / time slot used, rounded down, at most the tier maximum |
+| Base XP | The greater of the tier minimum and tier maximum x minutes on site / time slot used, rounded down, at most the tier maximum |
 | Hotspot threshold | 3 or more distinct reporters in the area in the last 30 days |
 | Hotspot bonus | 20% of base XP, rounded down, limited so base plus bonus is at most the tier maximum |
 
-For an easy event of 100 minutes or more, that is 1 XP per minute on site up to 100.
+For an easy event of 100 minutes or more, that is at least 25 XP, then 1 XP per minute on site once that exceeds the minimum, up to 100.
 On an easy walk-up, an hour on site earns 100 XP and 30 minutes earns 50; on a legendary walk-up, the same times earn 300 and 150.
 A member who earns the tier's full base XP gets no hotspot bonus, because the bonus cannot push the total past the tier maximum.
 
@@ -314,9 +316,11 @@ Everyone who checked in sees a popup with the XP they earned once the party ends
 - The app checks for rewards when the user signs in, when it comes back to the foreground, after leaving or ending a party, and every minute while a party they are in is under way.
 - The popup counts the XP up with light rays and a burst of sparkles, and lists the time on site, any hotspot bonus and the bags filled.
   With reduced motion it shows the total at once.
-- A member who checked in but earned 0 XP still sees the popup, which explains that XP comes from time on site.
+- A member who checked in before these minimum awards were introduced may still have an older 0 XP reward.
+  The popup continues to show those historical rewards.
 - Abandoned and cancelled parties have no reward.
 The event card's "up to" figure and each quest's `maxXp` are the tier maximum.
+After a party ends, the quests map and list refresh immediately, removing completed quests and cancelled or ended events while the open card keeps its outcome visible.
 
 The Leaderboard tab uses `GET /leaderboards` to show daily, weekly, monthly and all-time XP, with all time selected initially.
 Days, weeks and months use the current UTC period, and weeks start on Monday.
@@ -468,7 +472,7 @@ Done:
 
 Open:
 
-- [x] XP numbers: up to the tier maximum (100 to 300 XP) per party from the share of the time slot on site (see [XP](#xp)).
+- [x] XP numbers: a tier minimum (25 to 75 XP) and up to the tier maximum (100 to 300 XP) per party from the share of the time slot on site (see [XP](#xp)).
 - [x] Make the event card's "up to" XP agree with the XP awarded.
 - [ ] Make the level curve agree with the XP awarded.
 - [x] Hotspot bonus XP and threshold: 20% bonus at 3 distinct reporters.

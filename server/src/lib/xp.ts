@@ -11,6 +11,15 @@ export const TIER_MAX_XP: Record<DifficultyTier, number> = {
   legendary: 300,
 };
 
+// Every checked-in member earns at least this much when the party ends with a photo,
+// even when a quick cleanup has no full minute between location pings.
+export const TIER_MIN_XP: Record<DifficultyTier, number> = {
+  easy: 25,
+  medium: 40,
+  hard: 50,
+  legendary: 75,
+};
+
 // A scheduled party's time slot counts as its length in whole minutes, between these limits.
 const MIN_SLOT_MINUTES = 1;
 const MAX_SLOT_MINUTES = 100;
@@ -24,10 +33,10 @@ export function scheduleSlotMinutes(start: Date, end: Date): number {
   return Math.min(MAX_SLOT_MINUTES, Math.max(MIN_SLOT_MINUTES, minutes));
 }
 
-// Base XP: the tier's maximum, times the share of the time slot spent on site.
+// Base XP: the time-based award, with a minimum for each difficulty tier.
 export function baseXp(tier: DifficultyTier, minutesOnSite: number, slotMinutes: number): number {
   const minutes = Math.min(Math.max(minutesOnSite, 0), slotMinutes);
-  return Math.floor((TIER_MAX_XP[tier] * minutes) / slotMinutes);
+  return Math.max(TIER_MIN_XP[tier], Math.floor((TIER_MAX_XP[tier] * minutes) / slotMinutes));
 }
 
 // The hotspot bonus on top of base XP, limited so the total stays within the tier's maximum.

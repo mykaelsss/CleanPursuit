@@ -206,10 +206,10 @@ export function CheckedInPanel({ party, leader, onSiteCount, tone, hot, note, on
 
 // How a cleanup turned out, shown on its card once it is over. The XP popup shows each member what they earned.
 const ENDINGS: Partial<Record<Party['status'], { title: string; text: string }>> = {
-  completed: { title: 'Quest complete', text: 'Everyone who checked in earns XP for their time on site.' },
+  completed: { title: 'Quest complete', text: 'Everyone who checked in earns XP, even for a quick cleanup.' },
   partial: {
     title: 'Cleanup ended',
-    text: 'Everyone who checked in earns XP for their time on site. The quest stays open for the next group.',
+    text: 'Everyone who checked in earns XP, even for a quick cleanup. The quest stays open for the next group.',
   },
   abandoned: {
     title: 'Party over',

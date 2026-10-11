@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { after, describe, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
-import { createPool } from '../src/lib/db.ts';
+import { createPool, withTransaction } from '../src/lib/db.ts';
+import { handOffOrAbandon } from '../src/lib/parties.ts';
 import {
   type FakeStorage,
   fakeAnalyzer,
@@ -506,7 +507,7 @@ describe('parties', { skip }, () => {
     assert.equal(forbiddenEnd.statusCode, 403);
     assert.equal(forbiddenEnd.json().code, 'PARTY_LEADER_REQUIRED');
 
-    // 1 minute between two on-site pings in a 10-minute scheduled event earns 10 XP.
+    // 1 minute in a 10-minute event earns the easy-tier minimum of 25 XP.
     await setPings(pool, partyId, leader.userId, spot, [
       { minutesAgo: 2, onSite: true },
       { minutesAgo: 1, onSite: true },
@@ -576,10 +577,10 @@ describe('parties', { skip }, () => {
 
     assert.equal(finalState.rows[0].quest_status, 'completed');
     assert.ok(finalState.rows[0].completed_at);
-    assert.equal(finalState.rows[0].total_xp, 10);
+    assert.equal(finalState.rows[0].total_xp, 25);
     assert.equal(finalState.rows[0].ended_events, 1);
     assert.equal(finalState.rows[0].xp_events, 1);
-    assert.equal(finalState.rows[0].awarded_xp, 10);
+    assert.equal(finalState.rows[0].awarded_xp, 25);
     assert.equal(finalState.rows[0].minutes_on_site, 1);
 
     // A second attempt to end the party must not award XP again.
@@ -601,7 +602,7 @@ describe('parties', { skip }, () => {
       `SELECT total_xp FROM app_user WHERE id = $1`,
       [leader.userId],
     );
-    assert.equal(xpAfterDuplicate.rows[0].total_xp, 10);
+    assert.equal(xpAfterDuplicate.rows[0].total_xp, 25);
   });
 
 
@@ -802,7 +803,7 @@ describe('parties', { skip }, () => {
     const pool = createPool(env.DATABASE_URL);
     t.after(() => pool.end());
 
-    // 1 minute between two on-site pings in a 10-minute scheduled event earns 10 XP.
+    // 1 minute in a 10-minute event earns the easy-tier minimum of 25 XP.
     await setPings(pool, partyId, leader.userId, spot, [
       { minutesAgo: 2, onSite: true },
       { minutesAgo: 1, onSite: true },
@@ -848,11 +849,11 @@ describe('parties', { skip }, () => {
 
     assert.equal(state.rows[0].quest_status, 'open');
     assert.equal(state.rows[0].completed_at, null);
-    assert.equal(state.rows[0].total_xp, 10);
+    assert.equal(state.rows[0].total_xp, 25);
     assert.equal(state.rows[0].ended_events, 1);
     assert.equal(state.rows[0].xp_events, 1);
     assert.equal(state.rows[0].quest_completed_events, 0);
-    assert.equal(state.rows[0].awarded_xp, 10);
+    assert.equal(state.rows[0].awarded_xp, 25);
   });
 
 
@@ -1153,6 +1154,67 @@ describe('parties', { skip }, () => {
     );
     assert.equal(after.rows[0].quest_status, 'completed');
     assert.equal(after.rows[0].later_status, 'cancelled');
+  });
+
+  test('immediate walk-up completion awards every tier minimum and stays completed after settlement', async (t) => {
+    const { app, storage } = await startApp(t);
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    for (const { hazards, minimum } of [
+      { hazards: [], minimum: 25 },
+      { hazards: ['bulky_items'], minimum: 40 },
+      { hazards: ['broken_glass'], minimum: 50 },
+      { hazards: ['sharps'], minimum: 75 },
+    ]) {
+      const user = await signUp(app);
+      const spot = randomSpot();
+      const questId = await createQuest(app, storage, user.authorization, spot, hazards);
+      const { partyId: laterId } = await createScheduledParty(app, user.authorization, questId);
+      const joined = await walkUp(app, user.authorization, questId, spot);
+      assert.equal(joined.statusCode, 200);
+      const partyId = joined.json().id as string;
+      const afterPhotoFileId = await uploadPhoto(app, storage, user.authorization);
+
+      // Only the check-in ping exists, so there is no measured time on site.
+      const ended = await post(app, user.authorization, `/parties/${partyId}/end`, {
+        afterPhotoFileId, bagCount: 1, outcome: 'completed',
+      });
+      assert.equal(ended.statusCode, 200);
+      assert.equal(ended.json().status, 'completed');
+
+      // A stale handoff must not overwrite a party that already ended with a photo.
+      await withTransaction(pool, async (client) => {
+        await client.query('SELECT id FROM party WHERE id = $1 FOR UPDATE', [partyId]);
+        await handOffOrAbandon(client, partyId);
+      });
+
+      const get = (url: string) => app.inject({ method: 'GET', url, headers: { authorization: user.authorization } });
+      const [party, quest, rewards, mine, nearby] = await Promise.all([
+        get(`/parties/${partyId}`), get(`/quests/${questId}`), get('/me/rewards'), get('/me/party'),
+        get(`/quests?latitude=${spot.latitude}&longitude=${spot.longitude}&radiusM=100`),
+      ]);
+      for (const response of [party, quest, rewards, mine, nearby]) assert.equal(response.statusCode, 200);
+      assert.equal(party.json().status, 'completed');
+      assert.equal(party.json().afterPhotoFileId, afterPhotoFileId);
+      assert.equal(quest.json().status, 'completed');
+      assert.equal(quest.json().walkUp, null);
+      assert.equal(mine.json().party, null);
+      assert.ok(!nearby.json().quests.some((q: { id: string }) => q.id === questId));
+      const reward = rewards.json().rewards.find((r: { partyId: string }) => r.partyId === partyId);
+      assert.equal(reward.outcome, 'completed');
+      assert.equal(reward.minutesOnSite, 0);
+      assert.equal(reward.baseXp, minimum);
+      assert.equal(reward.xp, minimum);
+      assert.equal((await get(`/parties/${laterId}`)).json().status, 'cancelled');
+
+      const duplicate = await post(app, user.authorization, `/parties/${partyId}/end`, {
+        afterPhotoFileId, bagCount: 1, outcome: 'completed',
+      });
+      assert.equal(duplicate.statusCode, 409);
+      const { rows } = await pool.query('SELECT total_xp FROM app_user WHERE id = $1', [user.userId]);
+      assert.equal(rows[0].total_xp, minimum);
+    }
   });
 
   test('walk-up members time out, an empty walk-up is abandoned, and the next check-in starts a new one', async (t) => {
@@ -1593,6 +1655,17 @@ describe('parties', { skip }, () => {
     assert.equal(reward.partyId, partyId);
     assert.equal(reward.outcome, 'partial');
     assert.equal(reward.walkUp, true);
+    assert.equal(reward.minutesOnSite, 0);
+    assert.equal(reward.baseXp, 25);
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+    await withTransaction(pool, async (client) => {
+      await client.query('SELECT id FROM party WHERE id = $1 FOR UPDATE', [partyId]);
+      await handOffOrAbandon(client, partyId);
+    });
+    assert.equal((await getParty(app, user.authorization, partyId)).status, 'partial');
+    const quest = await app.inject({ method: 'GET', url: `/quests/${questId}`, headers: { authorization: user.authorization } });
+    assert.equal(quest.json().status, 'open');
   });
 
   test('checking in to an event leaves a walk-up, checking in to a walk-up leaves an event, and /me/party shows either', async (t) => {
