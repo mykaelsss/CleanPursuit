@@ -201,7 +201,9 @@ Event rules:
 - Anyone can schedule an event on an open quest, and becomes its leader (the organizer) and first attendee.
 - Events start in the future and last at most 12 hours.
 - Anyone can join an event until it ends, and can withdraw until they check in.
-- The organizer cannot withdraw from their own event.
+- The organizer cannot withdraw from their own event, but can call it off with `POST /events/{id}/cancel` until someone checks in.
+  After that, the leader ends it instead.
+- A member who checked in can leave with `POST /parties/{id}/leave` and check in again before the scheduled end, keeping their first check-in time.
 - Only the organizer can see attendees' email addresses.
 - The API has two routes that schedule parties.
   `POST /quests/{id}/events` applies the rules above.
@@ -213,11 +215,14 @@ Leader rules:
 - Only the leader can end the party.
 - The leader can hand the role to another member.
 - If the leader leaves without handing off, the member who has been there longest is promoted.
-- If nobody is left, the party is abandoned.
+- If nobody is left, a walk-up is abandoned.
+  An event keeps its leader until its scheduled end, so people who signed up can still arrive, and the first of them to check in becomes the leader.
+  An event nobody is at after its scheduled end is abandoned.
 
-For walk-ups, promotion and abandoning are built.
-When the leader leaves or times out, the member who checked in earliest and is still there becomes the leader, and when nobody is left the walk-up is abandoned.
-Handing the role off on purpose is not built, and events have none of these rules yet: a member who checked in cannot leave an event.
+Promotion and abandoning are built for walk-ups and events.
+When the leader leaves or times out, the member who checked in earliest and is still there becomes the leader.
+An organizer who has not checked in yet stays the leader, even if others arrive first.
+Handing the role off on purpose is not built.
 
 ### Presence
 
@@ -232,19 +237,19 @@ Handing the role off on purpose is not built, and events have none of these rule
   A gap with an off-site ping at either end does not count, and one gap counts for at most 10 minutes, so stepping away or dropping signal does not earn time.
   Nothing counts before check-in, after an event's scheduled end or after the party ends.
   The 10-minute limit is a temporary MVP value, to revisit with the ping rate after demo testing.
-- A walk-up member with no on-site ping for 30 minutes leaves with the reason `geofence_timeout`, keeping the time they already spent on site.
-  The API applies this the next time anyone checks in to, pings, leaves or ends that walk-up, and quests do not count those members as on site in the meantime.
+- A member with no on-site ping for 30 minutes leaves with the reason `geofence_timeout`, keeping the time they already spent on site.
+  The API applies this the next time anyone checks in to, pings, leaves, ends or reads that party, and quests do not count those members as on site in the meantime.
   The 30 minutes is a temporary MVP value, kept with the other presence values in `server/src/lib/presence.ts`.
-  Events do not time members out yet.
 - Pings are deleted after 30 days.
 
 ### Ending a party
 
 The leader submits an after photo, a bag count and an outcome.
 The after photo must be the leader's own confirmed upload and not attached to a report or another party.
-Only an active party with an open quest can be ended.
-A walk-up leader who timed out has already handed off, so the new leader ends it.
-An event that is under way when a walk-up completes its quest can no longer be ended, so its members get no XP; this is not handled yet.
+Only an active party can be ended, and its quest must be open or completed.
+A leader who timed out has already handed off, so the new leader ends it.
+A party still under way when another party completes its quest can still be ended, so its members earn XP for their time on site.
+Its outcome is recorded, but the quest stays completed by the first party, and its time on site stops counting at the last ping before then, since pings to a completed quest are refused.
 Members who never checked in are marked as no-shows, and everyone still checked in leaves with the party.
 Letting the leader correct the report's tags before XP is awarded is not built yet.
 
@@ -256,8 +261,8 @@ Letting the leader correct the report's tags before XP is awarded is not built y
 | Cancelled | A scheduled party was called off before it started | No |
 
 The leader chooses `completed` or `partial`.
-A walk-up is abandoned when nobody is left, and completing a quest cancels its events that have not started.
-There is no route to abandon or call off an event yet.
+A walk-up is abandoned when nobody is left, and an event when nobody is left after its scheduled end.
+The organizer can call off an event before anyone checks in, and completing a quest cancels its events that have not started.
 
 ```mermaid
 stateDiagram-v2
@@ -453,8 +458,9 @@ Open:
 - [x] Walk-up parties on bounties, with leader handoff, the 30-minute presence timeout and abandoning.
 - [x] Walk-up screens in the app: check in, location pings, leave and end.
 - [ ] Location pings while the app is in the background.
-- [ ] Check-in, location pings and ending for events in the app.
-- [ ] For events: leaving after check-in, leader handoff, the presence timeout and calling one off.
+- [ ] Check-in, location pings, leaving, calling off and ending for events in the app.
+- [x] For events: leaving after check-in, leader handoff, the presence timeout and calling one off.
+- [x] Ending a party that is under way when another party completes its quest.
 - [x] Daily, weekly and monthly leaderboards in the API.
 - [x] Demo region, for seed data and drop-off locations: New York City.
 - [x] Gear seed data for the equipment lookup.

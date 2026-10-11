@@ -294,6 +294,58 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
+  // Call off an event before it starts. Once someone has checked in, the leader ends it instead.
+  app.post(
+    '/events/:id/cancel',
+    {
+      onRequest: app.authenticate,
+      config: { rateLimit: perUserRateLimit(30, '1 hour') },
+      schema: {
+        tags: ['events'],
+        summary: 'Call off an event before it starts',
+        description: 'Only the organizer can call off an event, and only before anyone has checked in.',
+        security,
+        params: z.object({ id: z.uuid() }),
+        response: {
+          204: z.null(),
+          400: errorSchema,
+          401: errorSchema,
+          403: errorSchema,
+          404: errorSchema,
+          409: errorSchema,
+          429: errorSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params;
+      await withTransaction(app.db, async (client) => {
+        const { rows } = await client.query<{ leader_user_id: string; status: string }>(
+          `SELECT leader_user_id, status FROM party
+           WHERE id = $1 AND scheduled_start IS NOT NULL
+           FOR UPDATE`,
+          [id],
+        );
+        const event = rows[0];
+        if (!event) throw new HttpError(404, 'EVENT_NOT_FOUND', 'Party not found');
+        if (event.leader_user_id !== request.user.id) {
+          throw new HttpError(403, 'PARTY_LEADER_REQUIRED', 'Only the party leader can call off this party');
+        }
+        if (event.status !== 'scheduled') {
+          throw new HttpError(
+            409,
+            'EVENT_NOT_CANCELLABLE',
+            event.status === 'active'
+              ? 'Someone has checked in, so end the party instead'
+              : 'This party has already ended or was called off',
+          );
+        }
+        await client.query(`UPDATE party SET status = 'cancelled', ended_at = now() WHERE id = $1`, [id]);
+      });
+      return reply.status(204).send(null);
+    },
+  );
+
   app.post(
     '/quests/:id/events',
     {

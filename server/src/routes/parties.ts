@@ -131,10 +131,10 @@ async function findParty(
 	};
 }
 
-// Applies the walk-up presence rules to a live walk-up the caller has locked.
-// Members with no on-site ping for MEMBER_TIMEOUT_MINUTES leave, then the party
-// is handed off or abandoned if its leader is gone.
-async function settleLockedWalkUp(
+// Applies the presence rules to an active party the caller has locked. Members
+// with no on-site ping for MEMBER_TIMEOUT_MINUTES leave, then the party is handed
+// off or abandoned if its leader is gone.
+async function settleLockedParty(
 	client: pg.PoolClient,
 	party: { id: string; questId: string; areaId: string },
 ) {
@@ -159,9 +159,11 @@ async function settleLockedWalkUp(
 	await handOffOrAbandon(client, party.id);
 }
 
-// A walk-up whose leader left is led by the member who checked in earliest and is
+// A party whose leader left is led by the member who checked in earliest and is
 // still there. A walk-up with nobody checked in is abandoned, which frees the quest
-// for the next walk-up.
+// for the next walk-up. An event with nobody checked in keeps its leader until its
+// scheduled end, so people on their way can still arrive and the first of them to
+// check in leads; after the end it is abandoned.
 async function handOffOrAbandon(client: pg.PoolClient, partyId: string) {
 	const present = await client.query<{ user_id: string }>(
 		`SELECT user_id
@@ -182,7 +184,8 @@ async function handOffOrAbandon(client: pg.PoolClient, partyId: string) {
              p.started_at,
              (SELECT max(left_at) FROM party_member WHERE party_id = p.id)
            )
-       WHERE p.id = $1`,
+       WHERE p.id = $1
+         AND (p.scheduled_end IS NULL OR p.scheduled_end <= now())`,
 			[partyId],
 		);
 		return;
@@ -192,19 +195,19 @@ async function handOffOrAbandon(client: pg.PoolClient, partyId: string) {
 		`UPDATE party p
      SET leader_user_id = $2
      WHERE p.id = $1
-       AND NOT EXISTS (
+       AND EXISTS (
          SELECT 1 FROM party_member m
          WHERE m.party_id = p.id
            AND m.user_id = p.leader_user_id
-           AND m.status = 'checked_in'
+           AND m.status = 'left'
        )`,
 		[partyId, successor.user_id],
 	);
 }
 
-// Marks a checked-in member of a locked walk-up as having left by choice, then hands
-// off or abandons the walk-up. Returns false when the member was not checked in.
-async function leaveLockedWalkUp(
+// Marks a checked-in member of a locked party as having left by choice, then hands
+// off or abandons the party. Returns false when the member was not checked in.
+async function leaveLockedParty(
 	client: pg.PoolClient,
 	party: { id: string; questId: string; areaId: string },
 	userId: string,
@@ -233,16 +236,16 @@ async function leaveLockedWalkUp(
 	return true;
 }
 
-// Settles a live walk-up in its own transaction, so timeouts and handoffs stand
+// Settles an active party in its own transaction, so timeouts and handoffs stand
 // even when the request that noticed them is then rejected. Other parties are untouched.
-async function settleWalkUp(db: pg.Pool, partyId: string) {
+async function settleParty(db: pg.Pool, partyId: string) {
 	await withTransaction(db, async (client) => {
 		const result = await client.query<{ quest_id: string; area_id: string }>(
 			`SELECT p.quest_id, r.area_id::text AS area_id
        FROM party p
        JOIN quest q ON q.id = p.quest_id
        JOIN report r ON r.id = q.report_id
-       WHERE p.id = $1 AND p.status = 'active' AND p.scheduled_start IS NULL
+       WHERE p.id = $1 AND p.status = 'active'
        FOR UPDATE OF p`,
 			[partyId],
 		);
@@ -250,7 +253,7 @@ async function settleWalkUp(db: pg.Pool, partyId: string) {
 		const party = result.rows[0];
 		if (!party) return;
 
-		await settleLockedWalkUp(client, {
+		await settleLockedParty(client, {
 			id: partyId,
 			questId: party.quest_id,
 			areaId: party.area_id,
@@ -513,7 +516,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 				);
 
 				for (const other of elsewhere.rows) {
-					await leaveLockedWalkUp(
+					await leaveLockedParty(
 						client,
 						{ id: other.id, questId: other.quest_id, areaId: other.area_id },
 						userId,
@@ -531,7 +534,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 				let partyId = liveResult.rows[0]?.id;
 
 				if (partyId) {
-					await settleLockedWalkUp(client, {
+					await settleLockedParty(client, {
 						id: partyId,
 						questId,
 						areaId: quest.area_id,
@@ -628,8 +631,8 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 		},
 	);
 
-	// Leave a walk-up. A leader who leaves hands off to the member who checked in
-	// earliest, and the walk-up is abandoned when nobody is left.
+	// Leave a party after checking in. A leader who leaves hands off to the member
+	// who checked in earliest; see handOffOrAbandon for a party nobody is left at.
 	app.post(
 		"/parties/:partyId/leave",
 		{
@@ -637,9 +640,11 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			config: { rateLimit: perUserRateLimit(30, "1 hour") },
 			schema: {
 				tags: ["parties"],
-				summary: "Leave a walk-up cleanup",
+				summary: "Leave a cleanup you checked in to",
 				description:
-					"Members keep the time they spent on site and earn XP if the walk-up ends with an after photo.",
+					"Members keep the time they spent on site and earn XP if the party ends with an after photo. " +
+					"A leader who leaves hands off to the member who checked in earliest and is still there. " +
+					"To withdraw from an event before checking in, use DELETE /events/{id}/join.",
 				security,
 				params: z.object({ partyId: z.uuid() }),
 				response: {
@@ -656,16 +661,15 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			const { partyId } = request.params;
 			const userId = request.user.id;
 
-			await settleWalkUp(app.db, partyId);
+			await settleParty(app.db, partyId);
 
 			await withTransaction(app.db, async (client) => {
 				const result = await client.query<{
 					status: PartyStatus;
-					scheduled_start: Date | null;
 					quest_id: string;
 					area_id: string;
 				}>(
-					`SELECT p.status, p.scheduled_start, p.quest_id, r.area_id::text AS area_id
+					`SELECT p.status, p.quest_id, r.area_id::text AS area_id
            FROM party p
            JOIN quest q ON q.id = p.quest_id
            JOIN report r ON r.id = q.report_id
@@ -680,23 +684,15 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					throw new HttpError(404, "PARTY_NOT_FOUND", "Party not found");
 				}
 
-				if (party.scheduled_start) {
-					throw new HttpError(
-						409,
-						"PARTY_NOT_WALK_UP",
-						"Leaving a scheduled party after checking in is not supported yet",
-					);
-				}
-
 				if (party.status !== "active") {
 					throw new HttpError(
 						409,
 						"PARTY_NOT_ACTIVE",
-						"This walk-up has already ended",
+						"This party is not under way",
 					);
 				}
 
-				const left = await leaveLockedWalkUp(
+				const left = await leaveLockedParty(
 					client,
 					{ id: partyId, questId: party.quest_id, areaId: party.area_id },
 					userId,
@@ -706,7 +702,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					throw new HttpError(
 						409,
 						"MEMBER_NOT_CHECKED_IN",
-						"You are not checked in to this walk-up",
+						"You are not checked in to this party",
 					);
 				}
 			});
@@ -752,6 +748,10 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			const { partyId } = request.params;
 			const userId = request.user.id;
 			const { latitude, longitude } = request.body.location;
+
+			// A member who timed out checks in again, and a party past its end with
+			// nobody left is abandoned first.
+			await settleParty(app.db, partyId);
 
 			await withTransaction(app.db, async (client) => {
 				// Lock the party so concurrent check-ins are serialized.
@@ -851,7 +851,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					);
 				}
 
-				if (member.status !== "signed_up" && member.status !== "checked_in") {
+				if (member.status === "no_show") {
 					throw new HttpError(
 						409,
 						"MEMBERSHIP_NOT_CHECKINABLE",
@@ -867,12 +867,15 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					);
 				}
 
-				if (member.status === "signed_up") {
+				if (member.status === "signed_up" || member.status === "left") {
+					// A member who left comes back, keeping their first check-in time.
 					await client.query(
 						`UPDATE party_member
              SET status = 'checked_in',
-                 checked_in_at = now(),
-                 last_on_site_at = now()
+                 checked_in_at = coalesce(checked_in_at, now()),
+                 last_on_site_at = now(),
+                 left_at = NULL,
+                 left_reason = NULL
              WHERE party_id = $1 AND user_id = $2`,
 						[partyId, userId],
 					);
@@ -902,6 +905,9 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 						[partyId, userId],
 					);
 				}
+
+				// The first to check in after the leader left takes over.
+				await handOffOrAbandon(client, partyId);
 
 				await client.query(
 					`INSERT INTO presence_ping
@@ -955,8 +961,8 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			const userId = request.user.id;
 			const { latitude, longitude } = request.body.location;
 
-			// A walk-up member who timed out must check in again.
-			await settleWalkUp(app.db, partyId);
+			// A member who timed out must check in again.
+			await settleParty(app.db, partyId);
 
 			return withTransaction(app.db, async (client) => {
 				const partyResult = await client.query<{
@@ -1076,8 +1082,8 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			const { afterPhotoFileId, bagCount, outcome } = request.body;
 			const userId = request.user.id;
 
-			// A walk-up leader who timed out has already handed off.
-			await settleWalkUp(app.db, partyId);
+			// A leader who timed out has already handed off.
+			await settleParty(app.db, partyId);
 
 			await withTransaction(app.db, async (client) => {
 				// Lock both records to serialize concurrent attempts to end a party
@@ -1131,13 +1137,20 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					);
 				}
 
-				if (party.quest_status !== "open") {
+				// A party still under way when another party completed the quest can
+				// end too, so its members earn XP for their time; the quest stays as it is.
+				// Presence pings stop counting once the quest is completed, since the
+				// presence route refuses them.
+				if (party.quest_status !== "open" && party.quest_status !== "completed") {
 					throw new HttpError(
 						409,
 						"QUEST_NOT_OPEN",
 						"The quest is no longer open",
 					);
 				}
+
+				const completesQuest =
+					outcome === "completed" && party.quest_status === "open";
 
 				const nowResult = await client.query<{ ended_at: Date }>(
 					`SELECT clock_timestamp() AS ended_at`,
@@ -1409,7 +1422,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
                                     );
                             }
 
-				if (outcome === "completed") {
+				if (completesQuest) {
 					await client.query(
 						`UPDATE quest
              SET status = 'completed',
@@ -1496,7 +1509,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 			const candidate = await findLive();
 			if (!candidate) return { party: null };
 
-			await settleWalkUp(app.db, candidate);
+			await settleParty(app.db, candidate);
 
 			const partyId = await findLive();
 			return { party: partyId ? await findParty(app, partyId) : null };
@@ -1522,7 +1535,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 		},
 		async (request) => {
 			// So members who walked away from a walk-up show as having left.
-			await settleWalkUp(app.db, request.params.partyId);
+			await settleParty(app.db, request.params.partyId);
 			const party = await findParty(app, request.params.partyId);
 			if (!party)
 				throw new HttpError(404, "PARTY_NOT_FOUND", "Party not found");
