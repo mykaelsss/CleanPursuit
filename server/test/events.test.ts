@@ -3,17 +3,25 @@ import { randomBytes } from 'node:crypto';
 import { after, describe, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
-import { maxXpForSchedule, xpFor } from '../src/lib/xp.ts';
+import { baseXp, hotspotBonusXp, scheduleSlotMinutes, WALK_UP_SLOT_MINUTES } from '../src/lib/xp.ts';
 import { type FakeStorage, fakeAnalyzer, fakePlaces, fakePool, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
 
-test('XP is 100 per hour on site, scaled by tier and capped at 3 hours', () => {
-  assert.equal(xpFor('easy', 60), 100);
-  assert.equal(xpFor('medium', 60), 150);
-  assert.equal(xpFor('hard', 90), 300);
-  assert.equal(xpFor('legendary', 30), 150);
-  assert.equal(xpFor('easy', 600), 300);
-  assert.equal(xpFor('easy', -5), 0);
-  assert.equal(maxXpForSchedule('hard', new Date('2026-01-01T10:00Z'), new Date('2026-01-01T12:00Z')), 400);
+test('XP is the share of the time slot spent on site, times the tier maximum', () => {
+  assert.equal(baseXp('easy', 30, 60), 50);
+  assert.equal(baseXp('medium', 60, 60), 150);
+  assert.equal(baseXp('hard', 90, 60), 200);
+  assert.equal(baseXp('legendary', 20, WALK_UP_SLOT_MINUTES), 100);
+  assert.equal(baseXp('easy', -5, 60), 0);
+  assert.equal(scheduleSlotMinutes(new Date('2026-01-01T10:00Z'), new Date('2026-01-01T12:00Z')), 100);
+  assert.equal(scheduleSlotMinutes(new Date('2026-01-01T10:00Z'), new Date('2026-01-01T10:00:30Z')), 1);
+});
+
+test('the hotspot bonus is 20% of base XP, within the tier maximum', () => {
+  assert.equal(hotspotBonusXp('easy', 50), 10);
+  assert.equal(hotspotBonusXp('easy', 90), 10);
+  assert.equal(hotspotBonusXp('easy', 100), 0);
+  assert.equal(hotspotBonusXp('legendary', 100), 20);
+  assert.equal(hotspotBonusXp('legendary', 290), 10);
 });
 
 test('GET /events without a token returns 401', async () => {
@@ -125,7 +133,7 @@ describe('events', { skip }, () => {
     assert.equal(event.organizer.id, organizer.userId);
     assert.equal(event.isOrganizer, true);
     assert.equal(event.difficultyTier, 'hard');
-    assert.equal(event.maxXp, 400);
+    assert.equal(event.maxXp, 200);
     assert.equal(event.attendeeCount, 1);
 
     const list = await app.inject({

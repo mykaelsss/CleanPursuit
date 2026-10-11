@@ -99,6 +99,15 @@ export interface Quest {
   title: string;
   status: 'open' | 'completed' | 'cancelled' | 'expired';
   report: LitterReport;
+  // The most XP one member can earn in a party on this quest, set by its difficulty tier.
+  maxXp: number;
+  // The walk-up cleanup under way, or null. Anyone at the spot can check in to join or start one.
+  walkUp: {
+    partyId: string;
+    leader: { id: string; username: string };
+    startedAt: string;
+    checkedInCount: number;
+  } | null;
 }
 
 export type AuthedRequest = <T>(path: string, options?: { method?: string; body?: unknown }) => Promise<T>;

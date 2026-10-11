@@ -62,7 +62,7 @@ export function QuestReward() {
           Party reward
         </ThemedText>
         <ThemedText type="small" style={{ color: theme.onReward }}>
-          Checked-in volunteers earn up to 100 XP when the leader ends a full or partial cleanup with an after photo.
+          Checked-in volunteers earn up to 100 XP on easy quests and up to 300 on legendary ones when the leader ends a full or partial cleanup with an after photo.
         </ThemedText>
       </View>
       <View style={[styles.rewardIcon, { backgroundColor: theme.backgroundElement }]}>

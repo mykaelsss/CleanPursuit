@@ -158,10 +158,18 @@ Rules that live in the API, not the database:
 
 - Check-in needs a signed-up member, a scheduled party inside its time slot, an open quest and a location within 100 m of the report.
   The first check-in sets the party `active` and `started_at`.
+- Walk-up check-in (`POST /quests/{id}/walk-up`) needs only an open quest and a location within 100 m.
+  It locks the quest row, so concurrent first check-ins start one walk-up, and either joins the active walk-up or inserts a new `active` party with the caller as leader and member.
+  A member who `left` checks in again by returning to `checked_in` with `left_at` and `left_reason` cleared, keeping `checked_in_at`.
+- A walk-up member whose `last_on_site_at` (or `checked_in_at`) is more than 30 minutes old becomes `left` with `geofence_timeout`, and `left_at` is their last on-site time.
+  The API applies this lazily, in its own transaction, before walk-up check-in, presence pings, leaving and ending, and quest responses ignore those members until then.
+- When a walk-up's leader is no longer `checked_in`, `leader_user_id` moves to the `checked_in` member with the earliest `checked_in_at`.
+  With nobody `checked_in`, the walk-up becomes `abandoned` with `ended_at` set to the last member's `left_at`.
 - `presence_ping.on_site` is computed with `ST_DWithin` against the quest's report location, within 100 m, and an on-site ping updates `party_member.last_on_site_at`.
-- Ending a party computes each member's time on site from `presence_ping`: the sum of the gaps between consecutive pings that were both on site, each gap at most 10 minutes, between check-in and the scheduled end.
+- Ending a party computes each member's time on site from `presence_ping`: the sum of the gaps between consecutive pings that were both on site, each gap at most 10 minutes, from check-in until the party ends or, for an event, its scheduled end if that is earlier.
 - Ending a party marks `signed_up` members `no_show` and `checked_in` members `left` with `party_ended`.
-- Not built yet: the first check-in on a walk-up becoming the leader, promoting the longest-present member when the leader leaves, and marking a member `left` with `geofence_timeout` after 30 minutes without an on-site ping.
+- Ending with `completed` sets the quest `completed` and its `scheduled` parties `cancelled`.
+- Not built yet for events: leaving after check-in, promoting a member when the leader leaves, and the 30-minute timeout.
 
 ### Equipment lookup
 

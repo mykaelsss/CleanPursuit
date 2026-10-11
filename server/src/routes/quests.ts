@@ -6,10 +6,12 @@ import { type DifficultyTier, difficultyTierSchema } from '../lib/difficulty.ts'
 import { errorSchema, HttpError } from '../lib/errors.ts';
 import { photoSchema } from '../lib/files.ts';
 import { geographyPoint, locationSchema, placeNameSchema, selectLocation } from '../lib/geo.ts';
+import { MEMBER_TIMEOUT_MINUTES } from '../lib/presence.ts';
 import { perUserRateLimit } from '../lib/rate-limit.ts';
 import { findReport, reportSchema } from '../lib/reports.ts';
 import type { Storage } from '../lib/storage.ts';
 import { userSummarySchema } from '../lib/users.ts';
+import { TIER_MAX_XP } from '../lib/xp.ts';
 
 const security = [{ bearerAuth: [] }];
 
@@ -17,12 +19,27 @@ const security = [{ bearerAuth: [] }];
 const questStatusSchema = z.enum(['open', 'completed', 'cancelled', 'expired']);
 type QuestStatus = z.infer<typeof questStatusSchema>;
 
+// The bounty's walk-up cleanup under way, if anyone is on site.
+const walkUpSchema = z
+  .object({
+    partyId: z.uuid(),
+    leader: userSummarySchema,
+    startedAt: z.iso.datetime(),
+    checkedInCount: z.number().int().describe('Members on site now'),
+  })
+  .nullable()
+  .describe('Check in with POST /quests/{id}/walk-up to join it, or to start one when this is null');
+
+const maxXpSchema = z.number().int().describe('The most XP one member can earn in a party on this quest');
+
 const questSchema = z.object({
   id: z.uuid(),
   title: z.string(),
   status: questStatusSchema,
   creator: userSummarySchema,
   report: reportSchema,
+  maxXp: maxXpSchema,
+  walkUp: walkUpSchema,
   createdAt: z.iso.datetime(),
   completedAt: z.iso.datetime().nullable(),
 });
@@ -41,24 +58,65 @@ const questSummarySchema = z.object({
   areaId: z.string().describe('H3 area of the report, to match against /hotspots'),
   hazards: z.array(z.string()).describe('Hazard codes, for map icons and warnings'),
   photo: photoSchema,
+  maxXp: maxXpSchema,
+  walkUp: walkUpSchema,
   createdAt: z.iso.datetime(),
 });
 
+// A quest's live walk-up, joined as `w`. Members who have not been on site for the timeout
+// no longer count, so a walk-up everyone walked away from does not show before it is settled.
+const WALK_UP_JOIN = `
+  LEFT JOIN LATERAL (
+    SELECT wp.id, wp.leader_user_id, wu.username AS leader_username, wp.started_at,
+           (SELECT count(*)::integer FROM party_member wm
+            WHERE wm.party_id = wp.id AND wm.status = 'checked_in'
+              AND coalesce(wm.last_on_site_at, wm.checked_in_at)
+                  >= now() - make_interval(mins => ${MEMBER_TIMEOUT_MINUTES})) AS checked_in_count
+    FROM party wp
+    JOIN app_user wu ON wu.id = wp.leader_user_id
+    WHERE wp.quest_id = q.id AND wp.status = 'active' AND wp.scheduled_start IS NULL
+  ) w ON w.checked_in_count > 0`;
+
+const WALK_UP_COLUMNS = `w.id AS walk_up_id, w.leader_user_id AS walk_up_leader_id,
+  w.leader_username AS walk_up_leader_username, w.started_at AS walk_up_started_at,
+  w.checked_in_count AS walk_up_checked_in_count`;
+
+interface WalkUpRow {
+  walk_up_id: string | null;
+  walk_up_leader_id: string | null;
+  walk_up_leader_username: string | null;
+  walk_up_started_at: Date | null;
+  walk_up_checked_in_count: number | null;
+}
+
+function toWalkUp(row: WalkUpRow): z.infer<typeof walkUpSchema> {
+  if (!row.walk_up_id) return null;
+  return {
+    partyId: row.walk_up_id,
+    leader: { id: row.walk_up_leader_id!, username: row.walk_up_leader_username! },
+    startedAt: row.walk_up_started_at!.toISOString(),
+    checkedInCount: row.walk_up_checked_in_count!,
+  };
+}
+
 async function findQuest(db: pg.Pool | pg.PoolClient, storage: Storage, id: string): Promise<Quest | null> {
-  const { rows } = await db.query<{
+  const { rows } = await db.query<WalkUpRow & {
     id: string;
     title: string;
     status: QuestStatus;
     report_id: string;
+    difficulty_tier: DifficultyTier;
     creator_id: string;
     creator_username: string;
     created_at: Date;
     completed_at: Date | null;
   }>(
-    `SELECT q.id, q.title, q.status, q.report_id, u.id AS creator_id, u.username AS creator_username,
-            q.created_at, q.completed_at
+    `SELECT q.id, q.title, q.status, q.report_id, r.difficulty_tier, u.id AS creator_id,
+            u.username AS creator_username, q.created_at, q.completed_at, ${WALK_UP_COLUMNS}
      FROM quest q
+     JOIN report r ON r.id = q.report_id
      JOIN app_user u ON u.id = q.created_by_user_id
+     ${WALK_UP_JOIN}
      WHERE q.id = $1`,
     [id],
   );
@@ -72,6 +130,8 @@ async function findQuest(db: pg.Pool | pg.PoolClient, storage: Storage, id: stri
     status: row.status,
     creator: { id: row.creator_id, username: row.creator_username },
     report: report!,
+    maxXp: TIER_MAX_XP[row.difficulty_tier],
+    walkUp: toWalkUp(row),
     createdAt: row.created_at.toISOString(),
     completedAt: row.completed_at?.toISOString() ?? null,
   };
@@ -150,7 +210,7 @@ const questRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request) => {
       const { latitude, longitude, radiusM, status, limit } = request.query;
-      const { rows } = await app.db.query<{
+      const { rows } = await app.db.query<WalkUpRow & {
         id: string;
         title: string;
         status: QuestStatus;
@@ -168,10 +228,11 @@ const questRoutes: FastifyPluginAsyncZod = async (app) => {
         `SELECT q.id, q.title, q.status, r.difficulty_tier, ${selectLocation('r.location')}, r.place_name,
                 round(ST_Distance(r.location, ${geographyPoint(2, 1)}))::integer AS distance_m, r.area_id::text,
                 ARRAY(SELECT hazard_code FROM report_hazard WHERE report_id = r.id ORDER BY hazard_code) AS hazards,
-                r.photo_file_id, f.key AS photo_key, q.created_at
+                r.photo_file_id, f.key AS photo_key, q.created_at, ${WALK_UP_COLUMNS}
          FROM quest q
          JOIN report r ON r.id = q.report_id
          JOIN file f ON f.id = r.photo_file_id
+         ${WALK_UP_JOIN}
          WHERE q.status = $3
            AND ST_DWithin(r.location, ${geographyPoint(2, 1)}, $4)
          ORDER BY distance_m, q.id
@@ -191,6 +252,8 @@ const questRoutes: FastifyPluginAsyncZod = async (app) => {
           areaId: row.area_id,
           hazards: row.hazards,
           photo: { id: row.photo_file_id, url: await app.storage.presignDownload(row.photo_key) },
+          maxXp: TIER_MAX_XP[row.difficulty_tier],
+          walkUp: toWalkUp(row),
           createdAt: row.created_at.toISOString(),
         })),
       );

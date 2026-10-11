@@ -174,9 +174,21 @@ There are two kinds, derived from whether a schedule is set:
 | Kind | How it starts | Leader |
 | --- | --- | --- |
 | Event (scheduled party) | Someone picks a time slot and asks for help | The person who scheduled it |
-| Bounty (walk-up party) | Anyone at the site checks in; others join the live party | The first person to check in |
+| Bounty (walk-up party) | Anyone at the site checks in with no sign-up; others join the live party | The first person to check in |
 
-Walk-up parties are not built yet: check-in and ending both need a scheduled party.
+Bounty rules:
+
+- Every open quest is a bounty, so nobody has to schedule anything before cleaning it up.
+- Checking in at the site with `POST /quests/{id}/walk-up` joins the walk-up under way, or starts one with that person as its leader.
+  A quest has at most one walk-up under way.
+- People come and go as they like while the walk-up is under way.
+  A member can leave with `POST /parties/{id}/leave` and check in again later, keeping their first check-in time.
+- A walk-up can start at any time, including before a scheduled event on the same quest.
+  If it completes the quest, the quest's events that have not started are cancelled.
+- Each quest shows its walk-up under way, with the leader and how many members are on site, or none.
+- A walk-up that nobody is still at is abandoned without XP, and the next check-in starts a new one.
+- The leader ends a walk-up the same way as an event.
+  After a partial cleanup the quest stays open for the next walk-up or event.
 
 Event rules:
 
@@ -197,28 +209,35 @@ Leader rules:
 - If the leader leaves without handing off, the member who has been there longest is promoted.
 - If nobody is left, the party is abandoned.
 
-Only the first two rules are built.
-Handing off, promotion and abandoning a party are not.
+For walk-ups, promotion and abandoning are built.
+When the leader leaves or times out, the member who checked in earliest and is still there becomes the leader, and when nobody is left the walk-up is abandoned.
+Handing the role off on purpose is not built, and events have none of these rules yet: a member who checked in cannot leave an event.
 
 ### Presence
 
-- Members who signed up check in by GPS when they arrive, between the scheduled start and end.
+- Members who signed up for an event check in by GPS when they arrive, between the scheduled start and end.
+- Anyone checks in to a walk-up by GPS whenever they arrive, while the quest is open.
 - Check-in and on-site pings use a 100 m geofence around the report location.
   The number is a temporary MVP value, to revisit after end-to-end demo testing.
-- The first check-in makes the party active.
+- The first check-in makes an event active; a walk-up is active from its first check-in.
 - The app sends location pings during the party, about once a minute.
 - Time on site adds up the gaps between consecutive pings that were both on site.
   A gap with an off-site ping at either end does not count, and one gap counts for at most 10 minutes, so stepping away or dropping signal does not earn time.
-  Nothing counts before check-in or after the scheduled end.
+  Nothing counts before check-in, after an event's scheduled end or after the party ends.
   The 10-minute limit is a temporary MVP value, to revisit with the ping rate after demo testing.
-- Removing a member after 30 minutes without an on-site ping is not built yet.
+- A walk-up member with no on-site ping for 30 minutes leaves with the reason `geofence_timeout`, keeping the time they already spent on site.
+  The API applies this the next time anyone checks in to, pings, leaves or ends that walk-up, and quests do not count those members as on site in the meantime.
+  The 30 minutes is a temporary MVP value, kept with the other presence values in `server/src/lib/presence.ts`.
+  Events do not time members out yet.
 - Pings are deleted after 30 days.
 
 ### Ending a party
 
 The leader submits an after photo, a bag count and an outcome.
 The after photo must be the leader's own confirmed upload and not attached to a report or another party.
-Only an active scheduled party with an open quest can be ended.
+Only an active party with an open quest can be ended.
+A walk-up leader who timed out has already handed off, so the new leader ends it.
+An event that is under way when a walk-up completes its quest can no longer be ended, so its members get no XP; this is not handled yet.
 Members who never checked in are marked as no-shows, and everyone still checked in leaves with the party.
 Letting the leader correct the report's tags before XP is awarded is not built yet.
 
@@ -229,7 +248,9 @@ Letting the leader correct the report's tags before XP is awarded is not built y
 | Abandoned | Stays open; everyone left without an after photo | No |
 | Cancelled | A scheduled party was called off before it started | No |
 
-The API accepts `completed` and `partial`; abandoned and cancelled have no route yet.
+The leader chooses `completed` or `partial`.
+A walk-up is abandoned when nobody is left, and completing a quest cancels its events that have not started.
+There is no route to abandon or call off an event yet.
 
 ```mermaid
 stateDiagram-v2
@@ -247,24 +268,25 @@ stateDiagram-v2
 - XP is awarded once per party, when the leader ends it with an after photo.
 - Only members who checked in earn XP, including people who left early.
 - Each member's XP is based on how much of the time slot they were on site.
-- XP does not scale with the difficulty tier yet.
-- A member earns at most 100 XP per party, hotspot bonus included.
+- XP scales with the quest's difficulty tier.
+- A member earns at most the tier maximum per party, hotspot bonus included.
 - Cleaning a hotspot adds bonus XP when the outcome is completed.
 - XP feeds daily, weekly and monthly aggregates plus each user's all-time total, and the API serves a leaderboard for each.
 
 | Rule | Value |
 | --- | --- |
-| Time slot used | The scheduled length in whole minutes, at least 1 and at most 100 |
-| Base XP | 100 x minutes on site / time slot used, rounded down, at most 100 |
+| Tier maximum | Easy 100, medium 150, hard 200, legendary 300 |
+| Time slot used | For an event, the scheduled length in whole minutes, at least 1 and at most 100; for a walk-up, 60 minutes |
+| Base XP | Tier maximum x minutes on site / time slot used, rounded down, at most the tier maximum |
 | Hotspot threshold | 3 or more distinct reporters in the area in the last 30 days |
-| Hotspot bonus | 20% of base XP, rounded down, limited so base plus bonus is at most 100 |
+| Hotspot bonus | 20% of base XP, rounded down, limited so base plus bonus is at most the tier maximum |
 
-For a time slot of 100 minutes or more, that is 1 XP per minute on site up to 100.
-For a 1-hour slot, a member there the whole hour earns 100 XP and one there 30 minutes earns 50.
-A member who earns the full 100 base XP gets no hotspot bonus, because the bonus cannot push the total past 100.
+For an easy event of 100 minutes or more, that is 1 XP per minute on site up to 100.
+On an easy walk-up, an hour on site earns 100 XP and 30 minutes earns 50; on a legendary walk-up, the same times earn 300 and 150.
+A member who earns the tier's full base XP gets no hotspot bonus, because the bonus cannot push the total past the tier maximum.
 
-The event card's "up to" figure comes from `server/src/lib/xp.ts` (100 XP per hour on site, times easy 1x, medium 1.5x, hard 2x or legendary 3x, capped at 3 hours).
-That is not what ending a party awards, so the card can show more XP than members receive.
+The rules live in `server/src/lib/xp.ts`.
+The event card's "up to" figure and each quest's `maxXp` are the tier maximum.
 
 The Leaderboard tab uses `GET /leaderboards` to show daily, weekly, monthly and all-time XP, with all time selected initially.
 Days, weeks and months use the current UTC period, and weeks start on Monday.
@@ -301,7 +323,7 @@ The numbers live in `server/src/lib/levels.ts`.
 | 15 | 59,200 | Max level |
 
 The curve was tuned for a typical cleanup earning a few hundred XP, so a regular volunteer would reach the middle levels in a few months and level 15 would take well over a hundred cleanups.
-Parties now award at most 100 XP, so level 15 takes at least 592 cleanups.
+Parties now award at most 100 XP on easy quests and 300 on legendary ones, so level 15 takes at least 592 easy or 198 legendary cleanups.
 Revisit the curve or the XP rules so they agree.
 XP keeps counting past level 15 for the leaderboards.
 
@@ -397,7 +419,7 @@ The core loop ships first so there is always a working demo.
 
 | Risk | Mitigation |
 | --- | --- |
-| XP can be farmed with staged or exaggerated photos | Award XP only after the after photo, only to GPS-checked-in members, cap XP at 100 per member per party, treat the reporter's tier as provisional |
+| XP can be farmed with staged or exaggerated photos | Award XP only after the after photo, only to GPS-checked-in members, cap XP per member per party at the tier maximum, treat the reporter's tier as provisional |
 | Gemini misclassifies a photo | Gemini extracts features only; our rules set the tier; the party leader corrects tags before XP |
 | Drop-off search returns places that do not accept sharps | NYC's official site list first, Places only as fallback, and a verify-before-you-go note on each Places result |
 | Google Places terms limit caching | Store only place IDs and refetch details |
@@ -409,18 +431,21 @@ The core loop ships first so there is always a working demo.
 Done:
 
 - Schema migrations `001` to `009` are applied to the DEV Tiger service and tested.
-- API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, quests, events and scheduled parties with GPS check-in and presence, ending a party with XP from presence pings and the hotspot bonus, daily, weekly, monthly and all-time leaderboards, hotspots, equipment and drop-offs.
+- API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, quests, events and scheduled parties with GPS check-in and presence, walk-up parties on bounties with leader handoff, timeouts and abandoning, ending a party with XP from presence pings and the hotspot bonus, daily, weekly, monthly and all-time leaderboards, hotspots, equipment and drop-offs.
 - 196 sharps drop-off sites imported from NYC Open Data.
 - Region: New York City (the five boroughs) for seed data, drop-off locations, escalation contacts and the resources page.
 
 Open:
 
-- [x] XP numbers: up to 100 XP per party from the share of the time slot on site (see [XP](#xp)).
-- [ ] Make the event card's "up to" XP and the level curve agree with the XP awarded.
+- [x] XP numbers: up to the tier maximum (100 to 300 XP) per party from the share of the time slot on site (see [XP](#xp)).
+- [x] Make the event card's "up to" XP agree with the XP awarded.
+- [ ] Make the level curve agree with the XP awarded.
 - [x] Hotspot bonus XP and threshold: 20% bonus at 3 distinct reporters.
 - [x] Geofence radius for check-in and on-site pings: 100 m for now.
 - [ ] One set of routes for scheduling and joining parties (`/events` and `/parties` overlap).
-- [ ] Walk-up parties, leader handoff, the 30-minute presence timeout, and abandoned and cancelled outcomes.
+- [x] Walk-up parties on bounties, with leader handoff, the 30-minute presence timeout and abandoning.
+- [ ] Walk-up screens in the app: check in, location pings, leave and end.
+- [ ] For events: leaving after check-in, leader handoff, the presence timeout and calling one off.
 - [x] Daily, weekly and monthly leaderboards in the API.
 - [x] Demo region, for seed data and drop-off locations: New York City.
 - [x] Gear seed data for the equipment lookup.

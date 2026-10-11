@@ -140,6 +140,7 @@ async function createQuest(
   storage: FakeStorage,
   authorization: string,
   spot: { latitude: number; longitude: number },
+  hazards: string[] = [],
 ) {
   const report = await app.inject({
     method: 'POST',
@@ -150,7 +151,7 @@ async function createQuest(
       description: 'Integration test litter report',
       location: spot,
       categories: ['mixed'],
-      hazards: [],
+      hazards,
     },
   });
 
@@ -196,6 +197,26 @@ async function createScheduledParty(
   createdPartyIds.push(partyId);
 
   return { partyId, scheduledStart: start };
+}
+
+async function walkUp(
+  app: App,
+  authorization: string,
+  questId: string,
+  location: { latitude: number; longitude: number },
+) {
+  const response = await app.inject({
+    method: 'POST',
+    url: `/quests/${questId}/walk-up`,
+    headers: { authorization },
+    payload: { location },
+  });
+  if (response.statusCode === 200) createdPartyIds.push(response.json().id);
+  return response;
+}
+
+function memberOf(party: { members: Array<{ userId: string; status: string }> }, userId: string) {
+  return party.members.find((member) => member.userId === userId);
 }
 
 describe('parties', { skip }, () => {
@@ -972,6 +993,237 @@ describe('parties', { skip }, () => {
 
     assert.equal(reuseAttempt.statusCode, 409);
     assert.equal(reuseAttempt.json().code, 'PHOTO_ALREADY_USED');
+  });
+
+  test('a walk-up starts on the first check-in, others join it, and the leader hands off on leaving', async (t) => {
+    const { app, storage } = await startApp(t);
+    const first = await signUp(app);
+    const second = await signUp(app);
+    const spot = randomSpot();
+    // Bulky items make the quest medium, so a full share of the slot is worth 150 XP.
+    const questId = await createQuest(app, storage, first.authorization, spot, ['bulky_items']);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const outside = await walkUp(app, first.authorization, questId, {
+      latitude: spot.latitude + 1,
+      longitude: spot.longitude,
+    });
+    assert.equal(outside.statusCode, 403);
+    assert.equal(outside.json().code, 'CHECK_IN_OUTSIDE_GEOFENCE');
+
+    const started = await walkUp(app, first.authorization, questId, spot);
+    assert.equal(started.statusCode, 200);
+    const party = started.json();
+    assert.equal(party.status, 'active');
+    assert.equal(party.scheduledStart, null);
+    assert.equal(party.leader.id, first.userId);
+    assert.equal(memberOf(party, first.userId)?.status, 'checked_in');
+
+    const joined = await walkUp(app, second.authorization, questId, spot);
+    assert.equal(joined.statusCode, 200);
+    assert.equal(joined.json().id, party.id);
+    assert.equal(joined.json().leader.id, first.userId);
+    assert.equal(memberOf(joined.json(), second.userId)?.status, 'checked_in');
+
+    // Checking in again refreshes presence without a second check-in event.
+    const again = await walkUp(app, second.authorization, questId, spot);
+    assert.equal(again.json().id, party.id);
+    const checkIns = await pool.query(
+      `SELECT count(*)::int AS count FROM activity_event
+       WHERE party_id = $1 AND user_id = $2 AND kind = 'party_checked_in'`,
+      [party.id, second.userId],
+    );
+    assert.equal(checkIns.rows[0].count, 1);
+
+    const quest = await app.inject({
+      method: 'GET',
+      url: `/quests/${questId}`,
+      headers: { authorization: second.authorization },
+    });
+    assert.equal(quest.statusCode, 200);
+    assert.equal(quest.json().maxXp, 150);
+    assert.equal(quest.json().walkUp.partyId, party.id);
+    assert.equal(quest.json().walkUp.checkedInCount, 2);
+
+    // A scheduled party that has not started is cancelled when the walk-up completes the quest.
+    const later = await createScheduledParty(app, second.authorization, questId);
+
+    const afterPhotoFileId = await uploadPhoto(app, storage, second.authorization);
+    const endRequest = (authorization: string) =>
+      app.inject({
+        method: 'POST',
+        url: `/parties/${party.id}/end`,
+        headers: { authorization },
+        payload: { afterPhotoFileId, bagCount: 3, outcome: 'completed' },
+      });
+
+    const notLeader = await endRequest(second.authorization);
+    assert.equal(notLeader.statusCode, 403);
+    assert.equal(notLeader.json().code, 'PARTY_LEADER_REQUIRED');
+
+    const left = await app.inject({
+      method: 'POST',
+      url: `/parties/${party.id}/leave`,
+      headers: { authorization: first.authorization },
+    });
+    assert.equal(left.statusCode, 200);
+    assert.equal(left.json().status, 'active');
+    assert.equal(left.json().leader.id, second.userId);
+    assert.equal(memberOf(left.json(), first.userId)?.status, 'left');
+
+    const leftAgain = await app.inject({
+      method: 'POST',
+      url: `/parties/${party.id}/leave`,
+      headers: { authorization: first.authorization },
+    });
+    assert.equal(leftAgain.statusCode, 409);
+    assert.equal(leftAgain.json().code, 'MEMBER_NOT_CHECKED_IN');
+
+    // 30 minutes on site is half of the 60-minute walk-up slot; 20 minutes is a third.
+    await setPings(pool, party.id, second.userId, spot, [
+      { minutesAgo: 31, onSite: true },
+      { minutesAgo: 21, onSite: true },
+      { minutesAgo: 11, onSite: true },
+      { minutesAgo: 1, onSite: true },
+    ]);
+    await setPings(pool, party.id, first.userId, spot, [
+      { minutesAgo: 25, onSite: true },
+      { minutesAgo: 15, onSite: true },
+      { minutesAgo: 5, onSite: true },
+    ]);
+
+    const end = await endRequest(second.authorization);
+    assert.equal(end.statusCode, 200);
+    assert.equal(end.json().status, 'completed');
+
+    const awards = await pool.query(
+      `SELECT user_id, xp, minutes_on_site FROM activity_event
+       WHERE party_id = $1 AND kind = 'party_xp_awarded'`,
+      [party.id],
+    );
+    const xpByUser = new Map(awards.rows.map((row) => [row.user_id, row]));
+    assert.equal(xpByUser.get(second.userId)?.minutes_on_site, 30);
+    assert.equal(xpByUser.get(second.userId)?.xp, 75);
+    assert.equal(xpByUser.get(first.userId)?.minutes_on_site, 20);
+    assert.equal(xpByUser.get(first.userId)?.xp, 50);
+
+    const after = await pool.query(
+      `SELECT
+         (SELECT status FROM quest WHERE id = $1) AS quest_status,
+         (SELECT status FROM party WHERE id = $2) AS later_status`,
+      [questId, later.partyId],
+    );
+    assert.equal(after.rows[0].quest_status, 'completed');
+    assert.equal(after.rows[0].later_status, 'cancelled');
+  });
+
+  test('walk-up members time out, an empty walk-up is abandoned, and the next check-in starts a new one', async (t) => {
+    const { app, storage } = await startApp(t);
+    const first = await signUp(app);
+    const second = await signUp(app);
+    const spot = randomSpot();
+    const questId = await createQuest(app, storage, first.authorization, spot);
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const started = await walkUp(app, first.authorization, questId, spot);
+    assert.equal(started.statusCode, 200);
+    const stale = started.json();
+
+    // The leader's last on-site ping was longer ago than the 30-minute timeout.
+    await setPings(pool, stale.id, first.userId, spot, [
+      { minutesAgo: 45, onSite: true },
+      { minutesAgo: 31, onSite: true },
+    ]);
+
+    const quest = await app.inject({
+      method: 'GET',
+      url: `/quests/${questId}`,
+      headers: { authorization: second.authorization },
+    });
+    assert.equal(quest.json().walkUp, null);
+
+    const presence = await app.inject({
+      method: 'POST',
+      url: `/parties/${stale.id}/presence`,
+      headers: { authorization: first.authorization },
+      payload: { location: spot },
+    });
+    assert.equal(presence.statusCode, 409);
+
+    const fresh = await walkUp(app, second.authorization, questId, spot);
+    assert.equal(fresh.statusCode, 200);
+    assert.notEqual(fresh.json().id, stale.id);
+    assert.equal(fresh.json().leader.id, second.userId);
+
+    const old = await pool.query(
+      `SELECT p.status, p.ended_at, m.status AS member_status, m.left_reason
+       FROM party p
+       JOIN party_member m ON m.party_id = p.id AND m.user_id = $2
+       WHERE p.id = $1`,
+      [stale.id, first.userId],
+    );
+    assert.equal(old.rows[0].status, 'abandoned');
+    assert.ok(old.rows[0].ended_at);
+    assert.equal(old.rows[0].member_status, 'left');
+    assert.equal(old.rows[0].left_reason, 'geofence_timeout');
+
+    const noXp = await pool.query(
+      `SELECT count(*)::int AS count FROM activity_event
+       WHERE party_id = $1 AND kind = 'party_xp_awarded'`,
+      [stale.id],
+    );
+    assert.equal(noXp.rows[0].count, 0);
+
+    // A member who left can check in again while the walk-up is under way.
+    const joined = await walkUp(app, first.authorization, questId, spot);
+    assert.equal(joined.json().id, fresh.json().id);
+    const left = await app.inject({
+      method: 'POST',
+      url: `/parties/${fresh.json().id}/leave`,
+      headers: { authorization: first.authorization },
+    });
+    assert.equal(left.statusCode, 200);
+    const back = await walkUp(app, first.authorization, questId, spot);
+    assert.equal(back.statusCode, 200);
+    assert.equal(back.json().id, fresh.json().id);
+    assert.equal(memberOf(back.json(), first.userId)?.status, 'checked_in');
+    assert.equal(back.json().leader.id, second.userId);
+
+    // The last member leaving abandons the walk-up.
+    for (const member of [first, second]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/parties/${fresh.json().id}/leave`,
+        headers: { authorization: member.authorization },
+      });
+      assert.equal(response.statusCode, 200);
+    }
+    const abandoned = await app.inject({
+      method: 'GET',
+      url: `/parties/${fresh.json().id}`,
+      headers: { authorization: first.authorization },
+    });
+    assert.equal(abandoned.json().status, 'abandoned');
+  });
+
+  test('leaving a scheduled party is refused', async (t) => {
+    const { app, storage } = await startApp(t);
+    const leader = await signUp(app);
+    const spot = randomSpot();
+    const questId = await createQuest(app, storage, leader.authorization, spot);
+    const { partyId } = await createScheduledParty(app, leader.authorization, questId);
+
+    const leave = await app.inject({
+      method: 'POST',
+      url: `/parties/${partyId}/leave`,
+      headers: { authorization: leader.authorization },
+    });
+    assert.equal(leave.statusCode, 409);
+    assert.equal(leave.json().code, 'PARTY_NOT_WALK_UP');
   });
 
 });

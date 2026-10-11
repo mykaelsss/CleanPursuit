@@ -1,23 +1,36 @@
 import type { DifficultyTier } from './difficulty.ts';
 
 // XP rules. Keep docs/mvp.md in sync with these numbers.
-export const XP_PER_HOUR = 100;
-// Time on site beyond this earns nothing more, so a long party cannot farm XP.
-export const MAX_XP_HOURS = 3;
-export const TIER_MULTIPLIER: Record<DifficultyTier, number> = {
-  easy: 1,
-  medium: 1.5,
-  hard: 2,
-  legendary: 3,
+
+// The most XP one member can earn in one party, hotspot bonus included.
+// It scales with the quest's difficulty: easy 1x, medium 1.5x, hard 2x, legendary 3x.
+export const TIER_MAX_XP: Record<DifficultyTier, number> = {
+  easy: 100,
+  medium: 150,
+  hard: 200,
+  legendary: 300,
 };
 
-// XP for a given time on site at a given tier.
-export function xpFor(tier: DifficultyTier, minutesOnSite: number): number {
-  const hours = Math.min(Math.max(minutesOnSite, 0) / 60, MAX_XP_HOURS);
-  return Math.round(hours * XP_PER_HOUR * TIER_MULTIPLIER[tier]);
+// A scheduled party's time slot counts as its length in whole minutes, between these limits.
+const MIN_SLOT_MINUTES = 1;
+const MAX_SLOT_MINUTES = 100;
+// A walk-up has no schedule, so an hour on site earns the full amount.
+export const WALK_UP_SLOT_MINUTES = 60;
+const HOTSPOT_BONUS_PERCENT = 20;
+
+// The minutes on site that earn the full amount at a scheduled party.
+export function scheduleSlotMinutes(start: Date, end: Date): number {
+  const minutes = Math.floor((end.getTime() - start.getTime()) / 60_000);
+  return Math.min(MAX_SLOT_MINUTES, Math.max(MIN_SLOT_MINUTES, minutes));
 }
 
-// The most XP an attendee can earn at a scheduled party: present for the whole time slot.
-export function maxXpForSchedule(tier: DifficultyTier, start: Date, end: Date): number {
-  return xpFor(tier, (end.getTime() - start.getTime()) / 60_000);
+// Base XP: the tier's maximum, times the share of the time slot spent on site.
+export function baseXp(tier: DifficultyTier, minutesOnSite: number, slotMinutes: number): number {
+  const minutes = Math.min(Math.max(minutesOnSite, 0), slotMinutes);
+  return Math.floor((TIER_MAX_XP[tier] * minutes) / slotMinutes);
+}
+
+// The hotspot bonus on top of base XP, limited so the total stays within the tier's maximum.
+export function hotspotBonusXp(tier: DifficultyTier, base: number): number {
+  return Math.min(Math.floor((base * HOTSPOT_BONUS_PERCENT) / 100), Math.max(0, TIER_MAX_XP[tier] - base));
 }

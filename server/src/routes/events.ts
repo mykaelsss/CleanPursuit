@@ -9,7 +9,7 @@ import { geographyPoint, locationSchema, placeNameSchema, selectLocation } from 
 import { perUserRateLimit } from '../lib/rate-limit.ts';
 import type { Storage } from '../lib/storage.ts';
 import { userSummarySchema } from '../lib/users.ts';
-import { maxXpForSchedule } from '../lib/xp.ts';
+import { TIER_MAX_XP } from '../lib/xp.ts';
 
 // An event is a scheduled party: one attempt at a quest, with a time slot and an organizer (the leader).
 
@@ -109,7 +109,7 @@ async function toEvent(row: EventRow, userId: string, storage: Storage): Promise
     scheduledStart: row.scheduled_start.toISOString(),
     scheduledEnd: row.scheduled_end.toISOString(),
     organizer: { id: row.leader_user_id, username: row.organizer_username },
-    maxXp: maxXpForSchedule(row.difficulty_tier, row.scheduled_start, row.scheduled_end),
+    maxXp: TIER_MAX_XP[row.difficulty_tier],
     photo: { id: row.photo_file_id, url: await storage.presignDownload(row.photo_key) },
     attendeeCount: row.attendee_count,
     joined: row.joined,
