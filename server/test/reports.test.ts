@@ -98,6 +98,32 @@ describe('reports and quests', { skip }, () => {
     assert.ok(sharps.warning.length > 0);
   });
 
+  test('photo-to-report recovery returns null before submission and only permits the uploader', async (t) => {
+    const { app, storage } = await startApp(t);
+    const owner = await signUp(app);
+    const other = await signUp(app);
+    const photoFileId = await uploadPhoto(app, storage, owner.authorization);
+    const lookup = (authorization: string) => app.inject({
+      method: 'GET', url: `/files/${photoFileId}/report`, headers: { authorization },
+    });
+    const unused = await lookup(owner.authorization);
+    assert.equal(unused.statusCode, 200);
+    assert.equal(unused.json(), null);
+    const submitted = await postReport(app, owner.authorization, {
+      photoFileId, description: 'Bottles by the gate', location: randomSpot(), categories: ['plastic'],
+    });
+    assert.equal(submitted.statusCode, 201);
+    const recovered = await lookup(owner.authorization);
+    assert.equal(recovered.statusCode, 200);
+    assert.equal(recovered.json().id, submitted.json().id);
+    assert.equal(recovered.json().photo.id, photoFileId);
+    const denied = await lookup(other.authorization);
+    assert.equal(denied.statusCode, 404);
+    assert.equal(denied.json().code, 'FILE_NOT_FOUND');
+    const unsigned = await app.inject({ method: 'GET', url: `/files/${photoFileId}/report` });
+    assert.equal(unsigned.statusCode, 401);
+  });
+
   test('confirming the same upload twice returns the same file', async (t) => {
     const { app, storage } = await startApp(t);
     const { authorization } = await signUp(app);

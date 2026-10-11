@@ -54,6 +54,53 @@ export interface Leaderboard {
 
 export type DifficultyTier = 'easy' | 'medium' | 'hard' | 'legendary';
 
+export type LocationPoint = { latitude: number; longitude: number };
+export type Category = { code: string; label: string };
+export type Hazard = Category & { warning: string; requiresDropoff: boolean };
+export type ReportTags = { categories: Category[]; hazards: Hazard[] };
+export type VolumeRange = { minGallons: number; maxGallons: number };
+export type VolumeEstimate = VolumeRange & {
+  bags: { size: 'kitchen' | 'large' | 'contractor'; gallons: number; min: number; max: number }[];
+};
+export interface PhotoAnalysis {
+  fileId: string;
+  showsLitter: boolean;
+  description: string;
+  categories: string[];
+  hazards: string[];
+  estimatedVolume: VolumeEstimate | null;
+}
+export interface ReportInput {
+  photoFileId: string;
+  description: string;
+  location: LocationPoint;
+  placeName?: string;
+  categories: string[];
+  hazards: string[];
+  estimatedVolume?: VolumeRange;
+}
+export interface LitterReport {
+  id: string;
+  description: string;
+  location: LocationPoint;
+  placeName: string | null;
+  difficultyTier: DifficultyTier;
+  estimatedVolume: VolumeEstimate | null;
+  categories: Category[];
+  hazards: Hazard[];
+  photo: { id: string; url: string };
+  questId: string | null;
+  duplicateOf: { reportId: string; questId: string | null } | null;
+}
+export interface Quest {
+  id: string;
+  title: string;
+  status: 'open' | 'completed' | 'cancelled' | 'expired';
+  report: LitterReport;
+}
+
+export type AuthedRequest = <T>(path: string, options?: { method?: string; body?: unknown }) => Promise<T>;
+
 // An event is a scheduled cleanup on a quest. The organizer is the party leader.
 export interface CleanupEvent {
   id: string;

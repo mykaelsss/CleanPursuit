@@ -192,4 +192,57 @@ describe('events', { skip }, () => {
     assert.equal(res.statusCode, 400);
     assert.equal(res.json().code, 'START_IN_PAST');
   });
+
+  test('concurrent scheduling retries create one party and preserve its organizer membership', async (t) => {
+    const storage = fakeStorage();
+    const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer() });
+    t.after(() => app.close());
+    const organizer = await signUp(app);
+    const other = await signUp(app);
+    const spot = { latitude: -56 + Math.random(), longitude: -130 + Math.random() };
+    const questId = await createQuest(app, storage, organizer.authorization, spot);
+    const start = new Date(Date.now() + 86_400_000);
+    const end = new Date(start.getTime() + 3_600_000);
+    const schedule = (authorization: string, scheduledEnd = end.toISOString()) => app.inject({
+      method: 'POST', url: `/quests/${questId}/events`, headers: { authorization },
+      payload: { scheduledStart: start.toISOString(), scheduledEnd },
+    });
+    const responses = await Promise.all([schedule(organizer.authorization), schedule(organizer.authorization)]);
+    for (const response of responses) assert.equal(response.statusCode, 201);
+    const eventId = responses[0]!.json().id;
+    assert.equal(responses[1]!.json().id, eventId);
+    const retry = await schedule(organizer.authorization);
+    assert.equal(retry.statusCode, 201);
+    assert.equal(retry.json().id, eventId);
+    assert.equal(retry.json().attendeeCount, 1);
+    const count = await app.db.query<{ count: number }>(
+      `SELECT count(*)::integer AS count FROM party WHERE quest_id = $1`, [questId],
+    );
+    assert.equal(count.rows[0]!.count, 1);
+    const membership = await app.db.query<{ count: number }>(
+      `SELECT count(*)::integer AS count FROM party_member WHERE party_id = $1`, [eventId],
+    );
+    assert.equal(membership.rows[0]!.count, 1);
+    const anotherOrganizer = await schedule(other.authorization);
+    assert.equal(anotherOrganizer.statusCode, 201);
+    assert.notEqual(anotherOrganizer.json().id, eventId);
+    const anotherTime = await schedule(organizer.authorization, new Date(end.getTime() + 3_600_000).toISOString());
+    assert.equal(anotherTime.statusCode, 201);
+    assert.notEqual(anotherTime.json().id, eventId);
+
+    // The original request may be retried after its start time has passed.
+    start.setTime(Date.now() - 1_800_000);
+    end.setTime(Date.now() + 1_800_000);
+    await app.db.query(
+      `UPDATE party SET scheduled_start = $2, scheduled_end = $3, status = 'active', started_at = $2
+       WHERE id = $1`, [eventId, start, end],
+    );
+    await app.db.query(
+      `UPDATE party_member SET status = 'checked_in', checked_in_at = $2 WHERE party_id = $1`, [eventId, start],
+    );
+    const activeRetry = await schedule(organizer.authorization);
+    assert.equal(activeRetry.statusCode, 201);
+    assert.equal(activeRetry.json().id, eventId);
+    assert.equal(activeRetry.json().status, 'active');
+  });
 });

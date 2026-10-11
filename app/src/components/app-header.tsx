@@ -80,7 +80,7 @@ export default function AppHeader({
             CLEANPURSUIT
           </Text>
           <View
-            accessibilityElementsHidden
+            aria-hidden
             importantForAccessibility="no-hide-descendants"
             style={[styles.brandAccent, { backgroundColor: theme[brandColor] }]}
           />
