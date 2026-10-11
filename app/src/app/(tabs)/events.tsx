@@ -280,6 +280,8 @@ export default function EventsScreen() {
           selectedId={selectedId}
           onSelect={select}
           center={mapCenter}
+          // Only set when the user is in NYC, so it doubles as the location dot.
+          userLocation={mapCenter}
           bottomPadding={screenHeight * LIST_COVER[listIndex] + BottomTabInset}
         />
 
