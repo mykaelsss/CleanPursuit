@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseLocation, parseVolume, saveQuest } from '../src/lib/create-quest.ts';
-import { isValidSchedule, scheduleDates } from '../src/components/create-quest/schedule-utils.ts';
+import { parseLocation, parseVolume, photoPoint, saveQuest } from '../src/lib/create-quest.ts';
+import { isValidSchedule, scheduleDates, scheduleProblem } from '../src/components/create-quest/schedule-utils.ts';
 
 const input = {
   photoFileId: 'photo', description: 'Bottles by the gate', location: { latitude: 40.7, longitude: -74 },
@@ -27,6 +27,18 @@ test('location requires both valid coordinates, including zero and negative valu
   assert.deepEqual(parseLocation('0', '-74'), { latitude: 0, longitude: -74 });
 });
 
+test('photo GPS reads Android signed degrees and iOS degrees with N/S and E/W refs', () => {
+  assert.deepEqual(photoPoint({ exif: { GPSLatitude: 40.7265, GPSLongitude: -73.9815 } }), { latitude: 40.7265, longitude: -73.9815 });
+  assert.deepEqual(photoPoint({ exif: { GPSLatitude: -40.7265, GPSLatitudeRef: 'S', GPSLongitude: -73.9815, GPSLongitudeRef: 'W' } }),
+    { latitude: -40.7265, longitude: -73.9815 });
+  assert.deepEqual(photoPoint({ exif: { GPSLatitude: 40.7265, GPSLatitudeRef: 'N', GPSLongitude: 73.9815, GPSLongitudeRef: 'W' } }),
+    { latitude: 40.7265, longitude: -73.9815 });
+  assert.equal(photoPoint({ exif: null }), null);
+  assert.equal(photoPoint({ exif: { GPSLatitude: 40.7 } }), null);
+  assert.equal(photoPoint({ exif: { GPSLatitude: 0, GPSLongitude: 0 } }), null);
+  assert.equal(photoPoint({ exif: { GPSLatitude: 'abc', GPSLongitude: -74 } }), null);
+});
+
 test('volume accepts optional input, tight ranges and the small-pile allowance', () => {
   assert.equal(parseVolume('', ''), undefined);
   assert.deepEqual(parseVolume('100', '150'), { minGallons: 100, maxGallons: 150 });
@@ -48,6 +60,17 @@ test('scheduling converts local noon/midnight to dates and rejects past or long 
   assert.equal(isValidSchedule({ ...schedule, end: { ...schedule.end, minute: '01' } }, 0), false);
   assert.equal(isValidSchedule({ ...schedule, start: { ...schedule.start, hour: '1.5' } }, 0), false);
   assert.equal(isValidSchedule({ ...schedule, end: schedule.start }, 0), false);
+});
+
+test('schedule problems explain past starts and long parties, leaving bad times to the time inputs', () => {
+  const date = new Date(2030, 0, 15);
+  const schedule = { date, start: { hour: '1', minute: '00', meridiem: 'AM' },
+    end: { hour: '2', minute: '00', meridiem: 'PM' } };
+  const { start } = scheduleDates(schedule);
+  assert.equal(scheduleProblem(schedule, start.getTime() - 1), 'Parties can last at most 12 hours.');
+  assert.equal(scheduleProblem({ ...schedule, end: { ...schedule.end, hour: '1' } }, start.getTime() - 1), null);
+  assert.equal(scheduleProblem(schedule, start.getTime()), 'Pick a start time in the future.');
+  assert.equal(scheduleProblem({ ...schedule, end: schedule.start }, 0), null);
 });
 
 test('creation sends confirmed report fields and creates its quest without organizing a party', async () => {

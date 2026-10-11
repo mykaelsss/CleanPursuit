@@ -65,6 +65,8 @@ export type VolumeEstimate = VolumeRange & {
 export interface PhotoAnalysis {
   fileId: string;
   showsLitter: boolean;
+  // A suggested quest title; null when there is no litter.
+  title: string | null;
   description: string;
   categories: string[];
   hazards: string[];

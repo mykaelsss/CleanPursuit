@@ -60,6 +60,15 @@ export function isValidSchedule(schedule: ScheduleValue, now = Date.now()) {
     end.getTime() - start.getTime() <= 12 * 60 * 60 * 1000;
 }
 
+// Why a schedule with valid times is rejected. TimeRangeInput already explains invalid or reversed times.
+export function scheduleProblem(schedule: ScheduleValue, now = Date.now()) {
+  if (!isEndLater(schedule.start, schedule.end)) return null;
+  const { start, end } = scheduleDates(schedule);
+  if (start.getTime() <= now) return 'Pick a start time in the future.';
+  if (end.getTime() - start.getTime() > 12 * 60 * 60 * 1000) return 'Parties can last at most 12 hours.';
+  return null;
+}
+
 function timeInMinutes(time: TimeValue) {
   const hour24 = (Number(time.hour) % 12) + (time.meridiem === 'PM' ? 12 : 0);
   return hour24 * 60 + Number(time.minute);

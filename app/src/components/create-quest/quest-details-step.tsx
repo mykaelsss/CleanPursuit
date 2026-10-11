@@ -1,7 +1,8 @@
+import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import AppCard from '@/components/app-card';
-import { QUEST_TAGS } from '@/components/create-quest/constants';
+import { HAZARD_ICONS, QUEST_TAGS } from '@/components/create-quest/constants';
 import { FormField } from '@/components/create-quest/form-controls';
 import StepHeading from '@/components/create-quest/step-heading';
 import { ThemedText } from '@/components/themed-text';
@@ -22,6 +23,9 @@ type QuestDetailsStepProps = {
   onVolumeChange: (low: string, high: string) => void;
   onTagPress: (code: string) => void;
   onSafetyFlagPress: (code: string) => void;
+  done: boolean;
+  // The confirmation, shown at the end of the card.
+  children?: ReactNode;
 };
 
 export default function QuestDetailsStep({
@@ -37,12 +41,14 @@ export default function QuestDetailsStep({
   onVolumeChange,
   onTagPress,
   onSafetyFlagPress,
+  done,
+  children,
 }: QuestDetailsStepProps) {
   const theme = useTheme();
 
   return (
     <AppCard>
-      <StepHeading number={2} title="NAME THE MISSION" />
+      <StepHeading number={2} title="Name the mission" done={done} />
 
       <View style={styles.fieldGroup}>
         <View style={styles.labelRow}>
@@ -93,14 +99,14 @@ export default function QuestDetailsStep({
       <View style={styles.fieldGroup}>
         <FieldLabel title="Safety flags" helper="Select if present" />
         <ThemedText type="small" themeColor="textSecondary">
-          Flag items that need drop-off or sanitation escalation guidance.
+          Volunteers see a warning and the gear to bring for each flag.
         </ThemedText>
         <View style={styles.tags}>
           {tags.hazards.map((flag) => (
             <TagButton
               safety
               key={flag.code}
-              icon="⚠️"
+              icon={HAZARD_ICONS[flag.code] ?? '⚠️'}
               label={flag.label}
               selected={selectedSafetyFlags.includes(flag.code)}
               onPress={() => onSafetyFlagPress(flag.code)}
@@ -108,7 +114,10 @@ export default function QuestDetailsStep({
           ))}
         </View>
         {tags.hazards.filter((flag) => selectedSafetyFlags.includes(flag.code)).map((flag) => (
-          <ThemedText key={flag.code} type="small" themeColor="textSecondary">{flag.warning}</ThemedText>
+          <View key={flag.code} style={[styles.warning, { backgroundColor: theme.background, borderColor: theme.reward }]}>
+            <ThemedText type="smallBold">{flag.label}</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">{flag.warning}</ThemedText>
+          </View>
         ))}
       </View>
 
@@ -122,23 +131,47 @@ export default function QuestDetailsStep({
         </View>
         <VolumeSummary low={volumeLow} high={volumeHigh} />
       </View>
+
+      {children}
     </AppCard>
   );
 }
 
+// Common bag sizes, matching BAG_SIZES in server/src/lib/volume.ts.
+const BAGS = [{ label: 'kitchen', gallons: 13 }, { label: 'large trash', gallons: 33 }, { label: 'contractor', gallons: 42 }];
+
 function VolumeSummary({ low, high }: { low: string; high: string }) {
   const range = parseVolume(low, high);
-  if (range === null) return <ThemedText type="small" themeColor="error">
-    Use whole gallons from 1 to 10,000. The high estimate must be at least the low estimate and no more than 1.5 times it or 13 gallons above it.
-  </ThemedText>;
-  if (!range) return <ThemedText type="small" themeColor="textSecondary">Leave both blank if you are unsure. Flag bulky items separately.</ThemedText>;
-  return <View style={styles.fieldGroup}>
-    {[{ label: 'Kitchen', gallons: 13 }, { label: 'Large', gallons: 33 }, { label: 'Contractor', gallons: 42 }].map((bag) => (
-      <ThemedText key={bag.gallons} type="small" themeColor="textSecondary">
-        {bag.label} ({bag.gallons} gal): {Math.ceil(range.minGallons / bag.gallons)}-{Math.ceil(range.maxGallons / bag.gallons)} bags
-      </ThemedText>
-    ))}
+  if (range === null) {
+    return <ThemedText type="small" themeColor="error">{volumeProblem(low, high)}</ThemedText>;
+  }
+  if (!range) {
+    return <ThemedText type="small" themeColor="textSecondary">
+      Leave both blank if you are unsure. Flag bulky items as a safety flag instead of counting them.
+    </ThemedText>;
+  }
+  return <View style={styles.bags}>
+    <ThemedText type="smallBold">That fills about</ThemedText>
+    {BAGS.map((bag) => {
+      const min = Math.ceil(range.minGallons / bag.gallons);
+      const max = Math.ceil(range.maxGallons / bag.gallons);
+      return <ThemedText key={bag.gallons} type="small" themeColor="textSecondary">
+        {min === max ? min : `${min}-${max}`} {bag.label} {max === 1 ? 'bag' : 'bags'} ({bag.gallons} gal)
+      </ThemedText>;
+    })}
   </View>;
+}
+
+// Explains why parseVolume rejected the range, using the same rules.
+function volumeProblem(low: string, high: string) {
+  if (!low.trim() || !high.trim()) return 'Enter both a low and a high estimate, or leave both blank.';
+  const min = Number(low);
+  const max = Number(high);
+  if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max > 10_000) {
+    return 'Use whole gallons from 1 to 10,000.';
+  }
+  if (max < min) return 'The high estimate must be at least the low estimate.';
+  return `Narrow the range: the high estimate can be at most ${Math.max(Math.floor(min * 1.5), min + 13)} gallons for a low of ${min}.`;
 }
 
 function FieldLabel({ title, helper }: { title: string; helper: string }) {
@@ -222,6 +255,16 @@ const styles = StyleSheet.create({
   safetyTag: {
     minWidth: 130,
     justifyContent: 'center',
+  },
+  warning: {
+    borderWidth: 1,
+    borderLeftWidth: 4,
+    borderRadius: 12,
+    padding: 12,
+    gap: 2,
+  },
+  bags: {
+    gap: 2,
   },
   tagEmoji: {
     fontSize: 15,

@@ -9,6 +9,7 @@ export type QuestIconName =
   | 'sparkle'
   | 'close'
   | 'warning'
+  | 'check'
   | 'chevronLeft'
   | 'chevronRight';
 
@@ -73,6 +74,7 @@ export default function QuestIcon({ name, color, size = 22 }: QuestIconProps) {
           <Path {...line} d="M12 9v4m0 4h.01" />
         </>
       ) : null}
+      {name === 'check' ? <Path {...line} d="m5 12.5 4.5 4.5L19 7.5" /> : null}
       {name === 'chevronLeft' ? <Path {...line} d="m15 18-6-6 6-6" /> : null}
       {name === 'chevronRight' ? <Path {...line} d="m9 18 6-6-6-6" /> : null}
     </Svg>

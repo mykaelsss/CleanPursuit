@@ -28,19 +28,16 @@ export default function SafetyWarningModal({ flag, onCancel, onConfirm }: Safety
           </View>
           <View style={styles.copy}>
             <ThemedText type="subtitle" style={styles.title}>
-              Warning
-            </ThemedText>
-            <ThemedText type="smallBold">
-              This quest will be marked as {flag?.label.toLowerCase()}.
+              {flag?.label} warning
             </ThemedText>
             <ThemedText themeColor="textSecondary">{flag?.warning}</ThemedText>
             <ThemedText type="smallBold">
-              Do you want to mark this quest with this warning?
+              Add this warning to the quest? Volunteers will see it with drop-off sites and who to call.
             </ThemedText>
           </View>
           <View style={styles.actions}>
             <ModalButton label="No" onPress={onCancel} />
-            <ModalButton danger label="Yes" onPress={onConfirm} />
+            <ModalButton danger label="Yes, add it" onPress={onConfirm} />
           </View>
         </View>
       </View>

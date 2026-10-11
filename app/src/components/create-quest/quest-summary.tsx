@@ -4,8 +4,13 @@ import { useCallback, useEffect, useState } from 'react';
 import AppCard from '@/components/app-card';
 import { FormButton } from '@/components/create-quest/form-controls';
 import { ThemedText } from '@/components/themed-text';
-import type { Hazard, Quest, QuestDropoffs, QuestEquipment } from '@/lib/api';
+import type { Hazard, Quest, QuestDropoffs, QuestEquipment, VolumeEstimate } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { TIER_LABELS } from '@/lib/event-format';
+
+const BAG_LABELS: Record<VolumeEstimate['bags'][number]['size'], string> = {
+  kitchen: 'kitchen bags', large: 'large trash bags', contractor: 'contractor bags',
+};
 
 export default function QuestSummary({ quest, reportedHazards = [] }: { quest: Quest; reportedHazards?: Hazard[] }) {
   const { authedRequest } = useAuth();
@@ -32,13 +37,14 @@ export default function QuestSummary({ quest, reportedHazards = [] }: { quest: Q
   const point = quest.report.location;
   return <AppCard>
     <ThemedText type="subtitle">{quest.title}</ThemedText>
-    <ThemedText>{quest.report.placeName ?? `${point.latitude}, ${point.longitude}`}</ThemedText>
-    <ThemedText type="small">Location: {point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</ThemedText>
-    <ThemedText type="smallBold">Difficulty: {quest.report.difficultyTier}</ThemedText>
+    {quest.report.placeName ? <ThemedText>{quest.report.placeName}</ThemedText> : null}
+    <ThemedText type="small" themeColor="textSecondary">{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</ThemedText>
+    <ThemedText type="smallBold">Difficulty: {TIER_LABELS[quest.report.difficultyTier]}</ThemedText>
     <ThemedText>{quest.report.description}</ThemedText>
-    {quest.report.estimatedVolume?.bags.map((bag) => <ThemedText key={bag.size} type="small">
-      {bag.size} bags ({bag.gallons} gal): {bag.min}-{bag.max}
-    </ThemedText>)}
+    {quest.report.estimatedVolume ? <ThemedText type="small">
+      Bring {quest.report.estimatedVolume.bags.map((bag) =>
+        `${bag.min === bag.max ? bag.min : `${bag.min}-${bag.max}`} ${BAG_LABELS[bag.size]} (${bag.gallons} gal)`).join(', or ')}.
+    </ThemedText> : null}
     {newHazards.length > 0 ? <ThemedText type="smallBold">Your new sighting adds safety flags: {newHazards.map((hazard) => hazard.label).join(', ')}</ThemedText> : null}
     {hazards.map((hazard) => <ThemedText key={hazard.code} type="small">{hazard.label}: {hazard.warning}</ThemedText>)}
     {requiredGear.length > 0 && newHazards.length === 0 ? <ThemedText type="smallBold">Required gear: {requiredGear.map((item) => item.name).join(', ')}</ThemedText> : null}

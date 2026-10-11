@@ -1,4 +1,6 @@
-import type { AuthedRequest, LitterReport, Quest, ReportInput, VolumeRange } from './api';
+import type { ImagePickerAsset } from 'expo-image-picker';
+
+import type { AuthedRequest, LitterReport, LocationPoint, Quest, ReportInput, VolumeRange } from './api';
 
 export function parseLocation(latitude: string, longitude: string) {
   if (!latitude.trim() || !longitude.trim()) return null;
@@ -7,6 +9,28 @@ export function parseLocation(latitude: string, longitude: string) {
   return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
     ? { latitude: lat, longitude: lng }
     : null;
+}
+
+// Where a photo was taken, from its EXIF GPS tags, or null when it has none.
+// Android sends signed decimal degrees. iOS sends positive degrees with N/S and E/W refs,
+// and leaves GPS out of camera photos, so those need the phone's current location instead.
+export function photoPoint(photo: Pick<ImagePickerAsset, 'exif'>): LocationPoint | null {
+  const exif = photo.exif;
+  if (!exif) return null;
+  const latitude = signed(exif.GPSLatitude, exif.GPSLatitudeRef, 'S');
+  const longitude = signed(exif.GPSLongitude, exif.GPSLongitudeRef, 'W');
+  if (latitude === null || longitude === null) return null;
+  // 0, 0 is what some cameras write when they have no fix.
+  if (latitude === 0 && longitude === 0) return null;
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+  return { latitude, longitude };
+}
+
+function signed(value: unknown, ref: unknown, negative: 'S' | 'W'): number | null {
+  const degrees = typeof value === 'string' ? Number(value) : value;
+  if (typeof degrees !== 'number' || !Number.isFinite(degrees)) return null;
+  if (typeof ref !== 'string' || !ref) return degrees;
+  return ref.toUpperCase().startsWith(negative) ? -Math.abs(degrees) : Math.abs(degrees);
 }
 
 // undefined means optional and empty; null means invalid.

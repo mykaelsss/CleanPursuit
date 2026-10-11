@@ -93,7 +93,8 @@ A group gets credit together, and a cleanup can take several tries.
 - Gemini looks at the photo as soon as it is uploaded and prefills the form with a quest title, a description, trash categories, hazards and a trash amount (see [Trash amount](#trash-amount)).
 - The reporter confirms or edits the categories and any hazards, and our rules set the difficulty tier from them (see [Difficulty tier](#difficulty-tier)).
 - Selecting sharps or biohazard shows a Yes/No warning before the hazard is added to the report.
-  The warning tells volunteers not to pick up or touch the item and points them to drop-off and sanitation escalation information.
+  The warning recommends calling 311, tells anyone who handles it themselves to be extremely careful, and says volunteers will see drop-off sites and who to call.
+  Other hazards, such as broken glass or bulky items, are added without a prompt and show their warning text in the form.
 - If Gemini is slow or down, the form starts empty and the reporter fills it in by hand.
 - If someone reports a spot that is already reported, the app tells them it exists.
   A new report is still saved and linked to the original as a duplicate.
@@ -144,8 +145,12 @@ A single number looked more exact than it is: two Gemini models said 15 and 25 b
   Photos are resized and converted to JPEG before uploading directly to R2.
   Gemini suggestions prefill untouched fields; manual edits are preserved if analysis finishes later.
   The reporter can continue without AI suggestions and must confirm both the report details and the cleanup coordinates before submitting.
+  The spot is prefilled from the photo's GPS tags, or from the phone's location for a photo just taken with the camera, with a place name from the phone's geocoder.
+  A library photo without GPS tags leaves the spot empty, because it may have been taken elsewhere.
+  Prefilling stops once the reporter edits or looks up the location, and they still confirm the coordinates.
   On phones, GPS and address lookup help pin the spot; web supports GPS or manually entered coordinates.
-  Sharps and biohazard suggestions require the same Yes/No warning confirmation as manually selected hazards.
+  Sharps and biohazard suggestions require the same Yes/No warning confirmation as manually selected hazards; other suggested hazards are prefilled like categories.
+  While a confirmation is disabled, the form says what is still missing, and the create button names the next unfinished step.
   Scheduling an initial party is optional.
   When enabled, it makes the creator the organizer and first attendee, with a future start and a duration of at most 12 hours.
   The API still saves those records in report -> quest -> party order.

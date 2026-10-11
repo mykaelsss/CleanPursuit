@@ -1,22 +1,42 @@
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import AppCard from '@/components/app-card';
+import { FormButton } from '@/components/create-quest/form-controls';
 import QuestIcon from '@/components/create-quest/quest-icon';
 import StepHeading from '@/components/create-quest/step-heading';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 
+export type PhotoStatus = 'idle' | 'uploading' | 'analyzing' | 'ready' | 'error';
+export type PhotoSource = 'camera' | 'library';
+
 type PhotoStepProps = {
   photo: ImagePicker.ImagePickerAsset | null;
-  onPhotoChange: (photo: ImagePicker.ImagePickerAsset | null) => void;
+  status: PhotoStatus;
+  message: string | null;
+  // The source is set for a new photo, so the screen can tell if the reporter is at the spot.
+  onPhotoChange: (photo: ImagePicker.ImagePickerAsset | null, source?: PhotoSource) => void;
+  onRetry: () => void;
+  onSkipAnalysis: () => void;
 };
 
-export default function PhotoStep({ photo, onPhotoChange }: PhotoStepProps) {
-  const theme = useTheme();
+const BADGES: Record<PhotoStatus, string> = {
+  idle: 'Photo selected',
+  uploading: 'Uploading...',
+  analyzing: 'Checking the photo...',
+  ready: 'Uploaded',
+  error: 'Upload failed',
+};
 
-  const choosePhoto = async (source: 'camera' | 'library') => {
+export default function PhotoStep({ photo, status, message, onPhotoChange, onRetry, onSkipAnalysis }: PhotoStepProps) {
+  const theme = useTheme();
+  const working = status === 'uploading' || status === 'analyzing';
+  const badgeColor = status === 'error' ? theme.error : status === 'ready' ? theme.tint : theme.primary;
+  const badgeText = status === 'error' || status === 'ready' ? theme.onTint : theme.onPrimary;
+
+  const choosePhoto = async (source: PhotoSource) => {
     try {
       if (source === 'camera') {
         const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -31,13 +51,15 @@ export default function PhotoStep({ photo, onPhotoChange }: PhotoStepProps) {
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
+        // For the GPS tags, which prefill the spot. The upload is re-encoded without EXIF.
+        exif: true,
       };
       const result =
         source === 'camera'
           ? await ImagePicker.launchCameraAsync(options)
           : await ImagePicker.launchImageLibraryAsync(options);
 
-      if (!result.canceled) onPhotoChange(result.assets[0] ?? null);
+      if (!result.canceled) onPhotoChange(result.assets[0] ?? null, source);
     } catch {
       Alert.alert('Photo unavailable', 'We could not open your camera or photo library. Please try again.');
     }
@@ -45,7 +67,7 @@ export default function PhotoStep({ photo, onPhotoChange }: PhotoStepProps) {
 
   return (
     <AppCard>
-      <StepHeading number={1} title="SHOW THE SPOT" />
+      <StepHeading number={1} title="Show the spot" done={status === 'ready'} />
 
       {photo ? (
         <View style={styles.preview}>
@@ -61,9 +83,11 @@ export default function PhotoStep({ photo, onPhotoChange }: PhotoStepProps) {
             ]}>
             <QuestIcon name="close" color={theme.backgroundElement} size={18} />
           </Pressable>
-          <View style={[styles.readyBadge, { backgroundColor: theme.primary }]}>
-            <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>
-              PHOTO SELECTED
+          <View style={[styles.readyBadge, { backgroundColor: badgeColor }]}>
+            {working ? <ActivityIndicator size="small" color={badgeText} /> : null}
+            {status === 'ready' ? <QuestIcon name="check" color={badgeText} size={16} /> : null}
+            <ThemedText type="smallBold" style={{ color: badgeText }}>
+              {BADGES[status]}
             </ThemedText>
           </View>
         </View>
@@ -82,9 +106,20 @@ export default function PhotoStep({ photo, onPhotoChange }: PhotoStepProps) {
       )}
 
       <View style={styles.buttonRow}>
-        <PhotoButton label="Take photo" icon="camera" primary onPress={() => choosePhoto('camera')} />
-        <PhotoButton label="Upload" icon="upload" onPress={() => choosePhoto('library')} />
+        <PhotoButton label={photo ? 'Retake' : 'Take photo'} icon="camera" primary={!photo}
+          onPress={() => choosePhoto('camera')} />
+        <PhotoButton label={photo ? 'Choose another' : 'Choose photo'} icon="upload"
+          onPress={() => choosePhoto('library')} />
       </View>
+
+      {message ? (
+        <ThemedText type="small" themeColor={status === 'error' ? 'error' : 'textSecondary'}
+          accessibilityLiveRegion="polite">
+          {message}
+        </ThemedText>
+      ) : null}
+      {status === 'error' && photo ? <FormButton label="Retry photo upload" onPress={onRetry} /> : null}
+      {status === 'analyzing' ? <FormButton label="Continue without AI suggestions" onPress={onSkipAnalysis} /> : null}
     </AppCard>
   );
 }
@@ -145,6 +180,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   empty: {
     minHeight: 190,
