@@ -35,7 +35,7 @@ import type { PartyChange } from '@/components/party-panel';
 import { BottomTabInset, MIN_TOUCH, Spacing } from '@/constants/theme';
 import { useAnnounce } from '@/hooks/use-announce';
 import { useTheme } from '@/hooks/use-theme';
-import { ApiError, type EventDetail, type HotspotArea, type NearbyEvent, type NearbyQuest, type Quest } from '@/lib/api';
+import { ApiError, type CleanupEvent, type EventDetail, type HotspotArea, type NearbyEvent, type NearbyQuest, type Quest } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { describeDistance, describeEventTime, formatDistance, formatEventTime, TIER_LABELS } from '@/lib/event-format';
 import type { MapSelection, PinKind } from '@/lib/leaflet-map-html';
@@ -43,6 +43,11 @@ import { useLiveParty } from '@/lib/live-party';
 import { isInNyc, NYC_REGION } from '@/lib/nyc';
 
 type Point = { latitude: number; longitude: number };
+
+// Keep the open card's summary after completion removes its pin from the map.
+type CardSelection =
+  | { kind: 'event'; id: string; item: CleanupEvent }
+  | { kind: 'quest'; id: string; item: NearbyQuest };
 
 // Near the user, or the whole city when we don't know where they are.
 const NEARBY_RADIUS_M = 10_000;
@@ -113,9 +118,10 @@ export default function EventsScreen() {
   const [listPlaced, setListPlaced] = useState(false);
   const [screenHeight, setScreenHeight] = useState(windowHeight);
 
-  const [selected, setSelected] = useState<MapSelection | null>(null);
+  const [selected, setSelected] = useState<CardSelection | null>(null);
   // The latest selection, for checking whether a response is still wanted after an await.
   const selectedRef = useRef<MapSelection | null>(null);
+  const detailRequest = useRef(0);
   const cardOpen = useRef(false);
   const [detail, setDetail] = useState<EventDetail | null>(null);
   const [questDetail, setQuestDetail] = useState<Quest | null>(null);
@@ -143,8 +149,10 @@ export default function EventsScreen() {
     })();
   }, []);
 
+  const listRequest = useRef(0);
   const loadEvents = useCallback(async () => {
     if (!search) return;
+    const requestId = ++listRequest.current;
     const { center, radiusM } = search;
     const near = `latitude=${center.latitude}&longitude=${center.longitude}&radiusM=${radiusM}`;
     // Hotspots only decorate the map, so a failure keeps the last ones instead of blocking the list.
@@ -156,10 +164,12 @@ export default function EventsScreen() {
         authedRequest<{ events: NearbyEvent[] }>(`/events?${near}`),
         authedRequest<{ quests: NearbyQuest[] }>(`/quests?${near}&limit=100`),
       ]);
+      if (requestId !== listRequest.current) return;
       setEvents(events);
       setQuests(quests);
       setListError(null);
     } catch (err) {
+      if (requestId !== listRequest.current) return;
       setListError(errorMessage(err));
     }
   }, [authedRequest, search]);
@@ -184,9 +194,19 @@ export default function EventsScreen() {
   );
 
   const select = useCallback(
-    async (kind: PinKind, id: string) => {
-      const selection = { kind, id };
-      const isCurrent = () => selectedRef.current === selection;
+    async (kind: PinKind, id: string, createdEvent?: EventDetail) => {
+      let selection: CardSelection;
+      if (kind === 'event') {
+        const item = createdEvent ?? events?.find((event) => event.id === id);
+        if (!item) return;
+        selection = { kind, id, item };
+      } else {
+        const item = openQuests?.find((quest) => quest.id === id);
+        if (!item) return;
+        selection = { kind, id, item };
+      }
+      const requestId = ++detailRequest.current;
+      const isCurrent = () => selectedRef.current === selection && requestId === detailRequest.current;
       selectedRef.current = selection;
       setSelected(selection);
       setDetail(null);
@@ -206,35 +226,31 @@ export default function EventsScreen() {
         if (isCurrent()) setCardError(errorMessage(err));
       }
     },
-    [authedRequest],
+    [authedRequest, events, openQuests],
   );
 
   // Reloads the open card's details in place, such as after checking in to its walk-up.
   const reloadSelected = useCallback(async () => {
     const selection = selectedRef.current;
     if (!selection) return;
+    const requestId = ++detailRequest.current;
+    const isCurrent = () => selectedRef.current === selection && requestId === detailRequest.current;
     try {
       if (selection.kind === 'event') {
         const loaded = await authedRequest<EventDetail>(`/events/${selection.id}`);
-        if (selectedRef.current === selection) setDetail(loaded);
+        if (isCurrent()) setDetail(loaded);
       } else {
         const loaded = await authedRequest<Quest>(`/quests/${selection.id}`);
-        if (selectedRef.current === selection) setQuestDetail(loaded);
+        if (isCurrent()) setQuestDetail(loaded);
       }
     } catch {
       // The card keeps what it had; the list reload below shows any change.
     }
   }, [authedRequest]);
 
-  // A completed quest leaves the list, so after a cleanup ends the list reloads when the card closes,
-  // and the card can show the result until then.
-  const reloadOnClose = useRef(false);
+  // Refresh the pins immediately while the selected summary keeps the result card open.
   const onPartyChange = useCallback(
-    (change: PartyChange) => {
-      if (change === 'ended') {
-        reloadOnClose.current = true;
-        return;
-      }
+    (_change: PartyChange) => {
       reloadSelected();
       loadEvents();
     },
@@ -242,16 +258,16 @@ export default function EventsScreen() {
   );
 
   // The user's cleanup ended or changed elsewhere, such as its leader ending it, so the open card
-  // catches up, and the list does once the card closes.
+  // and map catch up too.
   const livePartyId = liveParty?.id ?? null;
   const lastLivePartyId = useRef(livePartyId);
   useEffect(() => {
     const previous = lastLivePartyId.current;
     lastLivePartyId.current = livePartyId;
     if (!previous || previous === livePartyId) return;
-    reloadOnClose.current = true;
     reloadSelected();
-  }, [livePartyId, reloadSelected]);
+    loadEvents();
+  }, [livePartyId, reloadSelected, loadEvents]);
 
   // Move screen reader focus with the selection, once the list is shown or hidden again: to the new title
   // when another pin is picked while the card is open, and back to the list when the card closes.
@@ -274,11 +290,7 @@ export default function EventsScreen() {
     setDetail(null);
     setQuestDetail(null);
     setCardError(null);
-    if (reloadOnClose.current) {
-      reloadOnClose.current = false;
-      loadEvents();
-    }
-  }, [loadEvents]);
+  }, []);
 
   const onCardChange = useCallback((index: number) => {
     const wasOpen = cardOpen.current;
@@ -326,12 +338,12 @@ export default function EventsScreen() {
     setBusy(true);
     setCardError(null);
     try {
-      const event = await authedRequest<{ id: string }>(`/quests/${selected.id}/events`, {
+      const event = await authedRequest<EventDetail>(`/quests/${selected.id}/events`, {
         method: 'POST',
         body: { scheduledStart: start.toISOString(), scheduledEnd: end.toISOString() },
       });
       await loadEvents();
-      select('event', event.id);
+      select('event', event.id, event);
       AccessibilityInfo.announceForAccessibility("Party scheduled. You're the leader.");
     } catch (err) {
       setCardError(errorMessage(err));
@@ -341,8 +353,8 @@ export default function EventsScreen() {
   }
 
   const selectedEvent =
-    selected?.kind === 'event' ? (detail ?? events?.find((e) => e.id === selected.id) ?? null) : null;
-  const selectedQuest = selected?.kind === 'quest' ? (openQuests?.find((q) => q.id === selected.id) ?? null) : null;
+    selected?.kind === 'event' ? (detail ?? selected.item) : null;
+  const selectedQuest = selected?.kind === 'quest' ? selected.item : null;
 
   const rows = useMemo<ListRow[]>(() => {
     const quests = openQuests ?? [];

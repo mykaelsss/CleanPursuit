@@ -903,7 +903,7 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 		},
 	);
 
-	// End an active cleanup and award time-based XP.
+	// End an active cleanup and award XP with a minimum for each difficulty tier.
 	app.post(
 		"/parties/:partyId/end",
 		{

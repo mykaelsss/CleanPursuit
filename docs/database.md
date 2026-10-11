@@ -174,6 +174,9 @@ Rules that live in the API, not the database:
   Before then the event stays `active` with its leader, and the next check-in takes over.
 - `presence_ping.on_site` is computed with `ST_DWithin` against the quest's report location, within 100 m, and an on-site ping updates `party_member.last_on_site_at`.
 - Ending a party computes each member's time on site from `presence_ping`: the sum of the gaps between consecutive pings that were both on site, each gap at most 10 minutes, from check-in until the party ends or, for an event, its scheduled end if that is earlier.
+- Every checked-in member earns at least the difficulty-tier minimum when a party ends with an after photo, even when those gaps total zero whole minutes.
+  Completed and partial parties both use the greater of that minimum and time-based XP, with the existing tier cap including any hotspot bonus.
+- Leader handoff and abandoning only update active parties, preserving completed and partial outcomes after members leave with `party_ended`.
 - Ending a party marks `signed_up` members `no_show` and `checked_in` members `left` with `party_ended`.
 - Ending with `completed` sets the quest `completed` and its `scheduled` parties `cancelled`.
 - Calling off an event (`POST /events/{id}/cancel`) is for its leader while it is `scheduled`, and sets it `cancelled` with `ended_at`.

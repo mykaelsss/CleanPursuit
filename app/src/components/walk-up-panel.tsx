@@ -48,7 +48,7 @@ export function WalkUpPanel({ questId, walkUp, maxXp, hot, tone, idle, children,
   const [ended, setEnded] = useState<Party | null>(null);
 
   const mine = session.party?.questId === questId && session.party.scheduledStart === null ? session.party : null;
-  const reward = `Up to ${maxXp.toLocaleString()} XP for ${FULL_XP_MINUTES} minutes on site.`;
+  const reward = `Every checked-in member earns a minimum XP award, even for a quick cleanup. Up to ${maxXp.toLocaleString()} XP for ${FULL_XP_MINUTES} minutes on site.`;
 
   const checkIn = () =>
     run(async () => {

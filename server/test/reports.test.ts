@@ -339,7 +339,9 @@ describe('reports and quests', { skip }, () => {
 
     const wide = await list(5000);
     assert.equal(wide.statusCode, 200);
-    const quests = wide.json().quests;
+    // The development database may contain other nearby quests from earlier runs.
+    // Compare our fixtures in the API's returned order, preserving distance checks.
+    const quests = wide.json().quests.filter((q: { id: string }) => questIds.includes(q.id));
     assert.deepEqual(
       quests.map((q: { id: string }) => q.id),
       questIds,
@@ -353,7 +355,7 @@ describe('reports and quests', { skip }, () => {
 
     const narrow = await list(500);
     assert.deepEqual(
-      narrow.json().quests.map((q: { id: string }) => q.id),
+      narrow.json().quests.map((q: { id: string }) => q.id).filter((id: string) => questIds.includes(id)),
       [questIds[0]],
     );
 

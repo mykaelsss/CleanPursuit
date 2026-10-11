@@ -6,14 +6,23 @@ import { createPool } from '../src/lib/db.ts';
 import { baseXp, hotspotBonusXp, scheduleSlotMinutes, WALK_UP_SLOT_MINUTES } from '../src/lib/xp.ts';
 import { type FakeStorage, fakeAnalyzer, fakePlaces, fakePool, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
 
-test('XP is the share of the time slot spent on site, times the tier maximum', () => {
+test('XP scales with time on site above the tier minimum and stops at the tier maximum', () => {
   assert.equal(baseXp('easy', 30, 60), 50);
   assert.equal(baseXp('medium', 60, 60), 150);
   assert.equal(baseXp('hard', 90, 60), 200);
   assert.equal(baseXp('legendary', 20, WALK_UP_SLOT_MINUTES), 100);
-  assert.equal(baseXp('easy', -5, 60), 0);
+  assert.equal(baseXp('easy', -5, 60), 25);
   assert.equal(scheduleSlotMinutes(new Date('2026-01-01T10:00Z'), new Date('2026-01-01T12:00Z')), 100);
   assert.equal(scheduleSlotMinutes(new Date('2026-01-01T10:00Z'), new Date('2026-01-01T10:00:30Z')), 1);
+});
+
+test('quick cleanups earn a baseline for every tier in walk-ups and scheduled parties', () => {
+  for (const [tier, minimum] of [['easy', 25], ['medium', 40], ['hard', 50], ['legendary', 75]] as const) {
+    for (const slot of [1, WALK_UP_SLOT_MINUTES, 100]) {
+      assert.equal(baseXp(tier, 0, slot), minimum);
+    }
+  }
+  assert.equal(hotspotBonusXp('easy', baseXp('easy', 0, WALK_UP_SLOT_MINUTES)), 5);
 });
 
 test('the hotspot bonus is 20% of base XP, within the tier maximum', () => {
