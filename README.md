@@ -111,7 +111,7 @@ While it runs, anyone with the API tunnel URL can reach the API and the DEV data
 ### Apply database migrations
 
 Migrations run in order against the Tiger Data service, one file at a time.
-Only run files that have not been applied yet; 001 to 007 are already on the DEV service.
+Only run files that have not been applied yet; 001 to 008 are already on the DEV service.
 The connection string comes from Infisical, so wrap the command in `infisical run`:
 
 ```bash
