@@ -13,7 +13,7 @@ For the product side, see [mvp.md](mvp.md).
 | Service | `clean-pursuit` (id `sm60nzjanh`), DEV, us-east-1 |
 | Postgres | 18.6, with built-in `uuidv7()` |
 | Extensions | TimescaleDB 2.30, PostGIS 3.6, h3 + h3_postgis 4.2 (pulls in postgis_raster), citext |
-| Applied | `001_initial_schema.sql`, `002_leaderboards_and_hotspots.sql`, `003_photo_analysis.sql`, `004_volume_estimates.sql` |
+| Applied | `001_initial_schema.sql`, `002_leaderboards_and_hotspots.sql`, `003_photo_analysis.sql`, `004_volume_estimates.sql`, `006_report_place_names.sql`, `007_equipment_seed.sql`, plus `005` from the `biohazard-dropoffs` branch |
 | Credentials | Connection string stored in Infisical, never in the repo |
 
 ## Conventions
@@ -149,10 +149,11 @@ stateDiagram-v2
 
 Rules that live in the API, not the database:
 
-- The first check-in on a walk-up becomes the leader.
-- If the leader leaves without handing off, the longest-present member is promoted.
-- A member with no on-site ping for 30 minutes is marked `left` with `geofence_timeout`.
-- `presence_ping.on_site` is computed with `ST_DWithin` against the quest's report location.
+- Check-in needs a signed-up member, a scheduled party inside its time slot, an open quest and a location within 100 m of the report.
+  The first check-in sets the party `active` and `started_at`.
+- `presence_ping.on_site` is computed with `ST_DWithin` against the quest's report location, within 100 m, and an on-site ping updates `party_member.last_on_site_at`.
+- Ending a party marks `signed_up` members `no_show` and `checked_in` members `left` with `party_ended`.
+- Not built yet: the first check-in on a walk-up becoming the leader, promoting the longest-present member when the leader leaves, and marking a member `left` with `geofence_timeout` after 30 minutes without an on-site ping.
 
 ### Equipment lookup
 
@@ -160,11 +161,13 @@ Rules that live in the API, not the database:
 | --- | --- |
 | `trash_category` | Fixed category list, seeded: plastic, paper, glass, metal, organic, textiles, electronics, mixed. |
 | `hazard` | Fixed hazard list with `warning_text` and `requires_dropoff`, seeded: sharps, biohazard, broken_glass, chemicals, bulky_items. |
-| `item` | A piece of gear, such as gloves or grabbers. Not seeded yet. |
-| `category_item` | Gear needed for a category. |
-| `hazard_item` | Gear needed for a hazard. |
+| `item` | A piece of gear, such as gloves or grabbers. `007` seeds a litter grabber, work gloves, heavy-duty trash bags, puncture-resistant gloves and closed-toe shoes. |
+| `category_item` | Gear needed for a category. `007` maps the grabber and gloves to every category, and trash bags to every category except electronics. |
+| `hazard_item` | Gear needed for a hazard. `007` maps puncture-resistant gloves and closed-toe shoes to `broken_glass`. |
 
 The gear list for a quest is derived by joining its report's tags to these tables, so Gemini is never called again for gear.
+A report with hazards gets only hazard gear, and gets none if any of its hazards has no gear mapped.
+A report with a hazard that has `requires_dropoff` gets no gear at all, only warnings.
 Hazard warnings never include sharps handling instructions; they point to drop-off and escalation.
 
 ### Drop-off locations
@@ -173,6 +176,10 @@ Hazard warnings never include sharps handling instructions; they point to drop-o
 | --- | --- |
 | `dropoff_location` | Sharps and biohazard drop-off sites. `seed` rows are hand-verified and carry name, address and location. `google_places` rows store only `google_place_id`, because Places terms limit caching; the API refetches details. |
 | `quest_dropoff` | The nearest drop-offs for a quest, fetched once, with `distance_m` and `rank`. `quest.dropoffs_fetched_at` records that the lookup ran, even if it found nothing. |
+
+The API fills `quest_dropoff` the first time a quest with a `requires_dropoff` hazard asks for drop-offs.
+It saves up to 5 rows with `verified_at`, a name, an address and a location within 25 km, nearest first, and only `accepts_sharps` rows for sharps.
+It does not search Google Places yet.
 
 ### Guilds (not in the MVP)
 
@@ -219,11 +226,11 @@ All aggregates are real-time (`materialized_only = false`) and bucket in UTC.
 | `area_hotspot_30d` | Plain view | `report_daily_by_area_reporter` | Always current |
 
 - XP aggregates carry `xp`, `minutes_on_site` and `parties` per user per bucket, indexed on `(bucket, xp DESC)`.
-- All-time XP is `app_user.total_xp`.
+- All-time XP is `app_user.total_xp`, and it is what the API's leaderboard ranks; the API does not read the daily, weekly or monthly aggregates yet.
 - A user's level is derived from `total_xp` in the API and is not stored (see [Levels](mvp.md#levels)).
 - `area_hotspot_30d` returns `distinct_reporters`, `reports` and `last_reported_day` per `area_id` for the last 30 days.
 - The heat map and the hotspot bonus use `distinct_reporters`, so one person re-reporting a spot cannot heat it up alone.
-- The bonus threshold (for example 3 or more reporters) lives in the API.
+- The bonus threshold lives in the API: 3 or more distinct reporters.
 - The dashboard groups areas with `h3_cell_to_parent(area_id, 7)` instead of a neighborhoods table.
 
 Refresh policies only look back a few days.
@@ -238,7 +245,6 @@ CALL refresh_continuous_aggregate('report_daily_by_area_reporter', NULL, NULL);
 
 ## Open items
 
-- Seed gear rows in `item`, `category_item` and `hazard_item`.
 - Seed a few months of backdated demo data for one region, plus hand-verified drop-offs.
 - Add a dashboard aggregate; it needs `area_id` on party events.
 - Drop `report.estimated_bag_count` once no deployed code reads it (kept in 004 so older branches still work on DEV).

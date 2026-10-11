@@ -8,11 +8,12 @@ It is being built for the 48-hour Hack Knight hackathon.
 1. **Report** a spot with a photo, location and description.
    Gemini suggests the trash categories and hazards, the reporter confirms them, and our rules set a difficulty tier.
 2. **Create a quest** from the report so others can see the problem.
-3. **Join a party** to clean it up, either a scheduled event or a walk-up on an open bounty.
-   Members check in by GPS.
-4. **End the party.** The party leader submits an after photo and a bag count.
-5. **Earn XP.** Everyone who checked in gets XP based on their time on site, scaled by difficulty, with a bonus for hotspots.
-   XP feeds daily, weekly and monthly leaderboards.
+3. **Join a party** to clean it up.
+   Parties are scheduled for now; walk-ups on open bounties are not built yet.
+   Members check in by GPS during the time slot.
+4. **End the party.** The party leader submits an after photo, a bag count and whether the cleanup is done.
+5. **Earn XP.** Everyone who checked in gets up to 100 XP, based on how much of the time slot they were on site, with a bonus for hotspots.
+   XP feeds the all-time leaderboard.
 
 Reports flagged for sharps or biohazards show warnings and nearby drop-off locations instead of handling instructions.
 
@@ -22,9 +23,9 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 
 | Part | State |
 | --- | --- |
-| Database | Migrations 001 to 006 applied to the DEV Tiger Data service (005 is on the `biohazard-dropoffs` branch) |
+| Database | Migrations 001 to 007 applied to the DEV Tiger Data service (005 is on the `biohazard-dropoffs` branch) |
 | App | Expo starter project in `app/` |
-| API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports and quests |
+| API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports, quests, events and parties, XP, the all-time leaderboard, hotspots, equipment and drop-offs |
 
 ## Tech stack
 
@@ -110,7 +111,7 @@ While it runs, anyone with the API tunnel URL can reach the API and the DEV data
 ### Apply database migrations
 
 Migrations run in order against the Tiger Data service, one file at a time.
-Only run files that have not been applied yet; 001 to 006 are already on the DEV service.
+Only run files that have not been applied yet; 001 to 007 are already on the DEV service.
 The connection string comes from Infisical, so wrap the command in `infisical run`:
 
 ```bash
@@ -204,6 +205,52 @@ infisical run -- npm run try:analysis -- --model gemini-3.5-flash-lite --model g
 
 Pass `--model` more than once to compare models on the same photos.
 Photos must be JPEG, PNG or WebP of at most 10 MB, and each model can analyze 30 photos per run.
+
+## Events and parties
+
+A party is one attempt at a quest.
+Two sets of routes create scheduled parties, and both make the same `party` rows.
+
+- `GET /events?latitude=&longitude=` lists upcoming and in-progress events nearby, soonest first.
+- `POST /quests/{id}/events` schedules an event on an open quest.
+  Events start in the future and last at most 12 hours.
+- `POST /events/{id}/join` signs up for an event until it ends, and `DELETE /events/{id}/join` withdraws before check-in.
+- `GET /events/{id}` returns an event with its attendees.
+- `POST /quests/{questId}/parties` also schedules a party on an open quest.
+  It needs a start in the future and an end after the start, with no length limit.
+  The person who schedules it is the leader and first member.
+- `POST /parties/{id}/join` signs up for a party before its start time.
+- `POST /parties/{id}/check-in` with `location` checks a signed-up member in.
+  It works only between the scheduled start and end, within 100 m of the report location.
+  The first check-in makes the party active.
+- `POST /parties/{id}/presence` with `location` records a GPS ping for a checked-in member of an active party.
+  Pings within 100 m move the member's last on-site time forward.
+- `POST /parties/{id}/end` lets the leader end an active scheduled party with `afterPhotoFileId`, `bagCount` and `outcome` (`completed` or `partial`).
+  The after photo must be the leader's own confirmed upload and not attached to anything else.
+  `completed` closes the quest; `partial` leaves it open.
+  Walk-up parties cannot be ended yet and get 409 `PARTY_NOT_SCHEDULED`.
+- `GET /parties/{id}` returns a party and its members.
+
+Ending a party awards XP to members who checked in; see [XP](docs/mvp.md#xp).
+
+## Leaderboards and hotspots
+
+- `GET /leaderboards?limit=` ranks users by all-time XP, 20 by default and at most 100.
+  Ties share a rank.
+- `GET /hotspots?limit=` lists H3 areas reported in the last 30 days with their center point, distinct reporters and report count, busiest first.
+  It returns 100 areas by default and at most 250.
+  `isHotspot` is true when 3 or more different people reported the area, which is when cleaning it earns bonus XP.
+
+## Equipment and drop-offs
+
+- `GET /quests/{id}/equipment` returns gear for a quest and the warnings for its hazards.
+  Gear comes from the report's categories, or from its hazards when it has any.
+  A quest with a hazard that needs drop-off (sharps or biohazard) gets no gear, only warnings.
+  If any reported hazard has no gear mapped, the gear list is empty rather than guessed.
+- `GET /quests/{id}/dropoffs` returns drop-off sites for a quest flagged with sharps or biohazard.
+  The first call saves the 5 nearest verified sites within 25 km (sharps-accepting ones for sharps), and later calls return the saved list.
+  When nothing is found, `escalationRecommended` is true and `guidance` points to sanitation and escalation.
+  Quests without those hazards get `required: false` and an empty list.
 
 ## Secrets
 
