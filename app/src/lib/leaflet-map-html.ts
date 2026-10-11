@@ -15,7 +15,7 @@ import { NYC_BOUNDS, NYC_MIN_ZOOM, NYC_REGION } from '@/lib/nyc';
 export const MAP_PAGE_URL = 'https://cleanpursuit.app/';
 
 // Scheduled parties show as XP bubbles. Open quests with no party yet show as waypoints: a diamond
-// with a "!", like a quest giver in a game.
+// with a "!", like a quest giver in a game. A spot where a walk-up cleanup is under way ripples.
 export type PinKind = 'event' | 'quest';
 
 export type MapSelection = { kind: PinKind; id: string };
@@ -30,6 +30,8 @@ export interface MapPin {
   fill: string;
   text: string;
   selected: boolean;
+  // People are cleaning the spot now.
+  live: boolean;
 }
 
 // A recently reported H3 area. It glows like an ember, brighter as more people report it, and shows its
@@ -90,15 +92,14 @@ export function useMapUpdate(options: {
     const hot = new Set(hotspots.filter((area) => area.isHotspot).map((area) => area.areaId));
     const pin = (
       kind: PinKind,
-      item: { id: string; title: string; difficultyTier: NearbyEvent['difficultyTier']; areaId: string } & {
-        location: { latitude: number; longitude: number };
-      },
+      item: Pick<NearbyEvent, 'id' | 'title' | 'difficultyTier' | 'areaId' | 'location' | 'walkUp'>,
       label: string,
       reward: string,
     ): MapPin => {
       const isSelected = selected?.kind === kind && selected.id === item.id;
       const tier = Tiers[item.difficultyTier];
-      const spoken = [item.title, TIER_LABELS[item.difficultyTier], reward, hot.has(item.areaId) ? 'hotspot' : null];
+      const live = item.walkUp ? `live now, ${item.walkUp.checkedInCount} on site` : null;
+      const spoken = [item.title, TIER_LABELS[item.difficultyTier], reward, live, hot.has(item.areaId) ? 'hotspot' : null];
       return {
         kind,
         id: item.id,
@@ -109,13 +110,14 @@ export function useMapUpdate(options: {
         fill: isSelected ? selectedFill : tier.fill,
         text: isSelected ? selectedText : tier.onFill,
         selected: isSelected,
+        live: item.walkUp !== null,
       };
     };
 
     return {
       type: 'update',
       pins: [
-        ...quests.map((quest) => pin('quest', quest, '!', 'no party yet')),
+        ...quests.map((quest) => pin('quest', quest, '!', quest.walkUp ? 'walk-up cleanup' : 'no party yet')),
         ...events.map((event) => {
           const xp = `${event.maxXp.toLocaleString()} XP`;
           return pin('event', event, xp, `party, up to ${xp}`);
@@ -179,6 +181,13 @@ export const LEAFLET_MAP_HTML = `<!doctype html>
   .cp-mark { position: relative; font-family: 'Lilita One', system-ui, sans-serif; font-size: 15px; line-height: 1; }
   .cp-waypoint.selected .cp-diamond { width: 30px; height: 30px; border-width: 3px; border-radius: 7px; }
   .cp-waypoint.selected .cp-mark { font-size: 20px; }
+  /* Live: a walk-up cleanup is under way, so the spot ripples. Parties ripple at their pointer's tip. */
+  .cp-live { position: absolute; width: 44px; height: 44px; border-radius: 50%; pointer-events: none;
+    border: 3px solid #2BB673; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+    animation: cp-ripple 2s ease-out infinite; }
+  .cp-pin .cp-live { bottom: -22px; left: 50%; margin-left: -22px; }
+  body.cp-still .cp-live { animation: none; }
+  @keyframes cp-ripple { 0% { transform: scale(0.75); opacity: 1; } 100% { transform: scale(1.35); opacity: 0.15; } }
   /* Reported areas glow like embers. Hotspots, reported by enough people to earn bonus XP, burn
      hotter and slowly breathe. Up close the glow steps back for the area's real hexagon. */
   .cp-heat { position: absolute; transform: translate(-50%, -50%); transition: opacity 0.3s; }
@@ -266,12 +275,13 @@ export const LEAFLET_MAP_HTML = `<!doctype html>
   }
 
   function pinHtml(pin) {
+    var live = pin.live ? '<div class="cp-live"></div>' : '';
     if (pin.kind === 'quest') {
-      return '<div class="cp-waypoint' + (pin.selected ? ' selected' : '') + '">' +
+      return '<div class="cp-waypoint' + (pin.selected ? ' selected' : '') + '">' + live +
         '<div class="cp-diamond" style="background:' + escapeHtml(pin.fill) + '"></div>' +
         '<div class="cp-mark" style="color:' + escapeHtml(pin.text) + '">' + escapeHtml(pin.label) + '</div></div>';
     }
-    return '<div class="cp-pin' + (pin.selected ? ' selected' : '') + '">' +
+    return '<div class="cp-pin' + (pin.selected ? ' selected' : '') + '">' + live +
       '<div class="cp-bubble" style="background:' + escapeHtml(pin.fill) + ';color:' + escapeHtml(pin.text) + '">' +
       escapeHtml(pin.label) + '</div>' +
       '<div class="cp-pointer" style="border-top-color:' + escapeHtml(pin.fill) + '"></div></div>';

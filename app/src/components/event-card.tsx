@@ -12,8 +12,9 @@ import {
 } from 'react-native';
 
 import { PhotoViewer } from '@/components/photo-viewer';
-import { Avatar, displayStyles, squish, TierBadge, xpText } from '@/components/quest-ui';
+import { Avatar, displayStyles, LiveBadge, squish, TierBadge, xpText } from '@/components/quest-ui';
 import { ThemedText } from '@/components/themed-text';
+import { WalkUpPanel, type WalkUpChange } from '@/components/walk-up-panel';
 import { MIN_TOUCH, Spacing } from '@/constants/theme';
 import { useTheme, useTierColors } from '@/hooks/use-theme';
 import type { CleanupEvent, DifficultyTier, EventDetail } from '@/lib/api';
@@ -26,16 +27,30 @@ interface EventCardProps {
   event: CleanupEvent;
   // Loaded after the card opens; holds the party member list.
   detail: EventDetail | null;
+  // Whether the spot is in a hotspot, where cleaning up earns bonus XP.
+  hot: boolean;
   busy: boolean;
   error: string | null;
   onJoin: () => void;
   onLeave: () => void;
+  onWalkUpChange: (change: WalkUpChange) => void;
   onClose: () => void;
   // The title, so the screen can move screen reader focus to it when the card opens.
   titleRef?: Ref<Text>;
 }
 
-export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose, titleRef }: EventCardProps) {
+export function EventCard({
+  event,
+  detail,
+  hot,
+  busy,
+  error,
+  onJoin,
+  onLeave,
+  onWalkUpChange,
+  onClose,
+  titleRef,
+}: EventCardProps) {
   const theme = useTheme();
   const leaderTag = useTierColors('legendary');
   // Older reports have no place name, so look up an address. Keyed by event, so switching
@@ -45,6 +60,8 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
   const where = event.placeName ?? (lookup ? (lookup.address ?? 'Pinned on the map') : 'Finding address…');
   const partySize = detail?.attendeeCount ?? event.attendeeCount;
   const duration = formatDuration(event.scheduledStart, event.scheduledEnd);
+  // The detail is fresher than the list once it has loaded.
+  const walkUp = detail ? detail.walkUp : event.walkUp;
 
   useEffect(() => {
     if (event.placeName) return;
@@ -68,6 +85,7 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
             </ThemedText>
           </View>
         ) : null}
+        {walkUp ? <LiveBadge count={walkUp.checkedInCount} /> : null}
       </View>
 
       <SitePhotoButton photo={event.photo} tier={event.difficultyTier} title={event.title} />
@@ -128,6 +146,21 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
           {error}
         </ThemedText>
       ) : null}
+
+      {/* Anyone at the spot can start cleaning before the party, or join a walk-up already going. */}
+      <WalkUpPanel
+        questId={event.questId}
+        walkUp={walkUp}
+        maxXp={event.maxXp}
+        hot={hot}
+        tone="plain"
+        idle={{
+          title: 'Here early?',
+          text: "You don't have to wait for the party. Check in to start cleaning now, and anyone at the spot can join.",
+          action: 'Check in now',
+        }}
+        onChange={onWalkUpChange}
+      />
 
       <View style={styles.facts}>
         <Fact label="Where" value={where} />

@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider, useAuth } from '@/lib/auth';
+import { WalkUpProvider } from '@/lib/walk-up';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -18,7 +19,9 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <AuthProvider>
-          <RootNavigator fontsReady={fontsLoaded || !!fontError} />
+          <WalkUpProvider>
+            <RootNavigator fontsReady={fontsLoaded || !!fontError} />
+          </WalkUpProvider>
         </AuthProvider>
       </ThemeProvider>
     </GestureHandlerRootView>

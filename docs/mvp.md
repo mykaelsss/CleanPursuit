@@ -188,6 +188,10 @@ Bounty rules:
 - A walk-up can start at any time, including before a scheduled event on the same quest.
   If it completes the quest, the quest's events that have not started are cancelled.
 - Each quest and event shows its quest's walk-up under way, with the leader and how many members are on site, or none.
+- In the app, a bounty is not a separate screen.
+  Quest and event cards on the quests map show a Live badge with the number on site, and the spot ripples on the map.
+  The quest card offers checking in to start or join the walk-up, next to scheduling a party for later, and the event card offers checking in before the party starts.
+  While checked in, the card shows who leads, whether the last ping was on site, a leave button, and for the leader an end form with the after photo, bag count and outcome.
 - A walk-up that nobody is still at is abandoned without XP, and the next check-in starts a new one.
 - The leader ends a walk-up the same way as an event.
   After a partial cleanup the quest stays open for the next walk-up or event.
@@ -223,6 +227,7 @@ Handing the role off on purpose is not built, and events have none of these rule
   The number is a temporary MVP value, to revisit after end-to-end demo testing.
 - The first check-in makes an event active; a walk-up is active from its first check-in.
 - The app sends location pings during the party, about once a minute.
+  For walk-ups it sends them while the app is open, from any screen; it does not ping in the background yet.
 - Time on site adds up the gaps between consecutive pings that were both on site.
   A gap with an off-site ping at either end does not count, and one gap counts for at most 10 minutes, so stepping away or dropping signal does not earn time.
   Nothing counts before check-in, after an event's scheduled end or after the party ends.
@@ -446,7 +451,9 @@ Open:
 - [x] Geofence radius for check-in and on-site pings: 100 m for now.
 - [ ] One set of routes for scheduling and joining parties (`/events` and `/parties` overlap).
 - [x] Walk-up parties on bounties, with leader handoff, the 30-minute presence timeout and abandoning.
-- [ ] Walk-up screens in the app: check in, location pings, leave and end.
+- [x] Walk-up screens in the app: check in, location pings, leave and end.
+- [ ] Location pings while the app is in the background.
+- [ ] Check-in, location pings and ending for events in the app.
 - [ ] For events: leaving after check-in, leader handoff, the presence timeout and calling one off.
 - [x] Daily, weekly and monthly leaderboards in the API.
 - [x] Demo region, for seed data and drop-off locations: New York City.
