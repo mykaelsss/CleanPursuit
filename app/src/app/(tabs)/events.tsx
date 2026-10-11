@@ -28,14 +28,16 @@ import AppHeader, { COMPACT_HEADER_HEIGHT } from '@/components/app-header';
 import { EventCard, SitePhoto } from '@/components/event-card';
 import { displayStyles, squish, TierBadge, XpBadge, xpText } from '@/components/quest-ui';
 import { EventsMap } from '@/components/events-map';
+import { HotspotBadge, QuestCard } from '@/components/quest-card';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MIN_TOUCH, Spacing } from '@/constants/theme';
 import { useAnnounce } from '@/hooks/use-announce';
 import { useTheme } from '@/hooks/use-theme';
-import { ApiError, type EventDetail, type NearbyEvent } from '@/lib/api';
+import { ApiError, type EventDetail, type HotspotArea, type NearbyEvent, type NearbyQuest, type Quest } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { describeDistance, describeEventTime, formatDistance, formatEventTime, TIER_LABELS } from '@/lib/event-format';
+import type { MapSelection, PinKind } from '@/lib/leaflet-map-html';
 import { isInNyc, NYC_REGION } from '@/lib/nyc';
 
 type Point = { latitude: number; longitude: number };
@@ -52,6 +54,23 @@ const LIST_SIZE_NAMES = ['Collapsed', 'Half screen', 'Full screen'];
 // At full screen the map is mostly hidden, so it keeps the half screen padding.
 const LIST_COVER = [0.25, 0.5, 0.5];
 const CARD_SNAP_POINTS = ['70%', '92%'];
+// The most areas /hotspots returns.
+const HOTSPOT_LIMIT = 250;
+
+// The list shows scheduled parties first, then open quests that still need one.
+type ListRow =
+  | { kind: 'event'; item: NearbyEvent }
+  | { kind: 'questsHeading' }
+  | { kind: 'quest'; item: NearbyQuest };
+
+function rowKey(row: ListRow): string {
+  return row.kind === 'questsHeading' ? row.kind : `${row.kind}:${row.item.id}`;
+}
+
+function countText(parties: number, quests: number): string {
+  const part = (n: number, one: string, many: string) => (n === 0 ? null : `${n} ${n === 1 ? one : many}`);
+  return [part(parties, 'party', 'parties'), part(quests, 'open quest', 'open quests')].filter(Boolean).join(' and ');
+}
 
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Can't reach CleanPursuit. Check your connection.";
@@ -84,16 +103,19 @@ export default function EventsScreen() {
   const [search, setSearch] = useState<{ center: Point; radiusM: number } | null>(null);
   const [mapCenter, setMapCenter] = useState<Point | null>(null);
   const [events, setEvents] = useState<NearbyEvent[] | null>(null);
+  const [quests, setQuests] = useState<NearbyQuest[] | null>(null);
+  const [hotspots, setHotspots] = useState<HotspotArea[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [listIndex, setListIndex] = useState(0);
   const [listPlaced, setListPlaced] = useState(false);
   const [screenHeight, setScreenHeight] = useState(windowHeight);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<MapSelection | null>(null);
   // The latest selection, for checking whether a response is still wanted after an await.
-  const selectedRef = useRef<string | null>(null);
+  const selectedRef = useRef<MapSelection | null>(null);
   const cardOpen = useRef(false);
   const [detail, setDetail] = useState<EventDetail | null>(null);
+  const [questDetail, setQuestDetail] = useState<Quest | null>(null);
   const [busy, setBusy] = useState(false);
   const [cardError, setCardError] = useState<string | null>(null);
 
@@ -121,37 +143,64 @@ export default function EventsScreen() {
   const loadEvents = useCallback(async () => {
     if (!search) return;
     const { center, radiusM } = search;
+    const near = `latitude=${center.latitude}&longitude=${center.longitude}&radiusM=${radiusM}`;
+    // Hotspots only decorate the map, so a failure keeps the last ones instead of blocking the list.
+    authedRequest<{ areas: HotspotArea[] }>(`/hotspots?${near}&limit=${HOTSPOT_LIMIT}`)
+      .then(({ areas }) => setHotspots(areas))
+      .catch(() => {});
     try {
-      const { events } = await authedRequest<{ events: NearbyEvent[] }>(
-        `/events?latitude=${center.latitude}&longitude=${center.longitude}&radiusM=${radiusM}`,
-      );
+      const [{ events }, { quests }] = await Promise.all([
+        authedRequest<{ events: NearbyEvent[] }>(`/events?${near}`),
+        authedRequest<{ quests: NearbyQuest[] }>(`/quests?${near}&limit=100`),
+      ]);
       setEvents(events);
+      setQuests(quests);
       setListError(null);
     } catch (err) {
       setListError(errorMessage(err));
     }
   }, [authedRequest, search]);
 
-  // Reload when the tab is opened, so new events and attendee counts show up.
+  // Reload when the tab is opened, so new quests, events and attendee counts show up.
   useFocusEffect(
     useCallback(() => {
       loadEvents();
     }, [loadEvents]),
   );
 
+  // Quests with an upcoming party show as that party, so each spot appears once.
+  const openQuests = useMemo(() => {
+    if (!quests) return null;
+    const scheduled = new Set(events?.map((event) => event.questId));
+    return quests.filter((quest) => !scheduled.has(quest.id));
+  }, [quests, events]);
+
+  const hotAreas = useMemo(
+    () => new Set(hotspots.filter((area) => area.isHotspot).map((area) => area.areaId)),
+    [hotspots],
+  );
+
   const select = useCallback(
-    async (id: string) => {
-      selectedRef.current = id;
-      setSelectedId(id);
+    async (kind: PinKind, id: string) => {
+      const selection = { kind, id };
+      const isCurrent = () => selectedRef.current === selection;
+      selectedRef.current = selection;
+      setSelected(selection);
       setDetail(null);
+      setQuestDetail(null);
       setCardError(null);
       cardSheet.current?.snapToIndex(0);
       try {
-        const loaded = await authedRequest<EventDetail>(`/events/${id}`);
-        // Ignore a slow response for an event the user has already moved away from.
-        if (selectedRef.current === id) setDetail(loaded);
+        // Ignore a slow response for a pin the user has already moved away from.
+        if (kind === 'event') {
+          const loaded = await authedRequest<EventDetail>(`/events/${id}`);
+          if (isCurrent()) setDetail(loaded);
+        } else {
+          const loaded = await authedRequest<Quest>(`/quests/${id}`);
+          if (isCurrent()) setQuestDetail(loaded);
+        }
       } catch (err) {
-        if (selectedRef.current === id) setCardError(errorMessage(err));
+        if (isCurrent()) setCardError(errorMessage(err));
       }
     },
     [authedRequest],
@@ -161,21 +210,22 @@ export default function EventsScreen() {
   // when another pin is picked while the card is open, and back to the list when the card closes.
   const hadSelection = useRef(false);
   useEffect(() => {
-    if (selectedId) {
+    if (selected) {
       if (cardOpen.current) focus(cardTitle);
     } else if (hadSelection.current) {
       focus(listTitle);
     }
-    hadSelection.current = selectedId !== null;
-  }, [selectedId]);
+    hadSelection.current = selected !== null;
+  }, [selected]);
 
   const closeCard = useCallback(() => cardSheet.current?.close(), []);
 
   // Swiping the card down, tapping the dimmed map, or pressing Close goes back to the list.
   const deselect = useCallback(() => {
     selectedRef.current = null;
-    setSelectedId(null);
+    setSelected(null);
     setDetail(null);
+    setQuestDetail(null);
     setCardError(null);
   }, []);
 
@@ -188,22 +238,22 @@ export default function EventsScreen() {
   // Android's back button closes the card before leaving the screen.
   useFocusEffect(
     useCallback(() => {
-      if (!selectedId) return;
+      if (!selected) return;
       const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
         closeCard();
         return true;
       });
       return () => subscription.remove();
-    }, [selectedId, closeCard]),
+    }, [selected, closeCard]),
   );
 
   async function changeAttendance(method: 'POST' | 'DELETE') {
-    if (!selectedId) return;
+    if (selected?.kind !== 'event') return;
     const joining = method === 'POST';
     setBusy(true);
     setCardError(null);
     try {
-      const updated = await authedRequest<EventDetail>(`/events/${selectedId}/join`, { method });
+      const updated = await authedRequest<EventDetail>(`/events/${selected.id}/join`, { method });
       setDetail(updated);
       setEvents(
         (list) =>
@@ -219,7 +269,39 @@ export default function EventsScreen() {
     }
   }
 
-  const selected = detail ?? events?.find((e) => e.id === selectedId) ?? null;
+  // Schedules the first party on an open quest, then shows that party's card.
+  async function scheduleParty(start: Date, end: Date) {
+    if (selected?.kind !== 'quest') return;
+    setBusy(true);
+    setCardError(null);
+    try {
+      const event = await authedRequest<{ id: string }>(`/quests/${selected.id}/events`, {
+        method: 'POST',
+        body: { scheduledStart: start.toISOString(), scheduledEnd: end.toISOString() },
+      });
+      await loadEvents();
+      select('event', event.id);
+      AccessibilityInfo.announceForAccessibility("Party scheduled. You're the leader.");
+    } catch (err) {
+      setCardError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const selectedEvent =
+    selected?.kind === 'event' ? (detail ?? events?.find((e) => e.id === selected.id) ?? null) : null;
+  const selectedQuest = selected?.kind === 'quest' ? (openQuests?.find((q) => q.id === selected.id) ?? null) : null;
+
+  const rows = useMemo<ListRow[]>(() => {
+    const quests = openQuests ?? [];
+    return [
+      ...(events ?? []).map((item) => ({ kind: 'event' as const, item })),
+      ...(quests.length > 0 && (events?.length ?? 0) > 0 ? [{ kind: 'questsHeading' as const }] : []),
+      ...quests.map((item) => ({ kind: 'quest' as const, item })),
+    ];
+  }, [events, openQuests]);
+  const loaded = events !== null && openQuests !== null;
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -242,8 +324,17 @@ export default function EventsScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: NearbyEvent }) => <EventRow event={item} onSelect={select} />,
-    [select],
+    ({ item: row }: { item: ListRow }) =>
+      row.kind === 'event' ? (
+        <EventRow event={row.item} hot={hotAreas.has(row.item.areaId)} onSelect={select} />
+      ) : row.kind === 'quest' ? (
+        <QuestRow quest={row.item} hot={hotAreas.has(row.item.areaId)} onSelect={select} />
+      ) : (
+        <ThemedText accessibilityRole="header" themeColor="text" style={[displayStyles.base, styles.sectionTitle]}>
+          Needs a party
+        </ThemedText>
+      ),
+    [select, hotAreas],
   );
 
   const sheetProps = useMemo(
@@ -266,7 +357,7 @@ export default function EventsScreen() {
     if (index >= 0) setListPlaced(true);
   }, []);
   const onLayout = useCallback((e: LayoutChangeEvent) => setScreenHeight(e.nativeEvent.layout.height), []);
-  const isCardOpen = selectedId !== null;
+  const isCardOpen = selected !== null;
 
   return (
     <ThemedView style={styles.container} onLayout={onLayout}>
@@ -286,7 +377,9 @@ export default function EventsScreen() {
         importantForAccessibility={isCardOpen ? 'no-hide-descendants' : 'auto'}>
         <EventsMap
           events={events ?? []}
-          selectedId={selectedId}
+          quests={openQuests ?? []}
+          hotspots={hotspots}
+          selected={selected}
           onSelect={select}
           center={mapCenter}
           // Only set when the user is in NYC, so it doubles as the location dot.
@@ -304,8 +397,8 @@ export default function EventsScreen() {
           onChange={onListChange}
           handleComponent={renderListHandle}>
           <BottomSheetFlatList
-            data={events ?? []}
-            keyExtractor={(event: NearbyEvent) => event.id}
+            data={rows}
+            keyExtractor={rowKey}
             renderItem={renderItem}
             contentContainerStyle={styles.list}
             ListHeaderComponent={
@@ -317,11 +410,12 @@ export default function EventsScreen() {
                   style={[displayStyles.base, styles.listTitle]}>
                   Quests near you
                 </ThemedText>
-                {events && events.length > 0 ? (
+                {loaded && rows.length > 0 ? (
                   <ThemedText type="small" themeColor="textSecondary">
-                    {events.length} {events.length === 1 ? 'quest' : 'quests'} to join
+                    {countText(events.length, openQuests.length)}
                   </ThemedText>
                 ) : null}
+                {hotspots.length > 0 ? <HotspotLegend /> : null}
               </View>
             }
             ListEmptyComponent={
@@ -339,9 +433,9 @@ export default function EventsScreen() {
                     </ThemedText>
                   </Pressable>
                 </View>
-              ) : events ? (
+              ) : loaded ? (
                 <ThemedText themeColor="textSecondary" style={[styles.status, styles.centered]}>
-                  No quests nearby yet.
+                  No quests nearby yet. Spot some litter? Report it from the Create tab.
                 </ThemedText>
               ) : (
                 <ActivityIndicator style={styles.status} color={theme.textSecondary} accessibilityLabel="Loading quests" />
@@ -362,14 +456,27 @@ export default function EventsScreen() {
         handleComponent={CardHandle}
         backdropComponent={renderBackdrop}>
         <BottomSheetScrollView contentContainerStyle={styles.card} accessibilityViewIsModal={isCardOpen}>
-          {selected ? (
+          {selectedEvent ? (
             <EventCard
-              event={selected}
+              event={selectedEvent}
               detail={detail}
               busy={busy}
               error={cardError}
               onJoin={() => changeAttendance('POST')}
               onLeave={() => changeAttendance('DELETE')}
+              onClose={closeCard}
+              titleRef={cardTitle}
+            />
+          ) : selectedQuest ? (
+            <QuestCard
+              // A different quest starts fresh, with the scheduler closed.
+              key={selectedQuest.id}
+              quest={selectedQuest}
+              detail={questDetail}
+              hot={hotAreas.has(selectedQuest.areaId)}
+              busy={busy}
+              error={cardError}
+              onSchedule={scheduleParty}
               onClose={closeCard}
               titleRef={cardTitle}
             />
@@ -416,10 +523,12 @@ function CardHandle(_props: BottomSheetHandleProps) {
 
 const EventRow = memo(function EventRow({
   event,
+  hot,
   onSelect,
 }: {
   event: NearbyEvent;
-  onSelect: (id: string) => void;
+  hot: boolean;
+  onSelect: (kind: PinKind, id: string) => void;
 }) {
   const party = `Party of ${event.attendeeCount}`;
   const status = event.joined ? (event.isOrganizer ? "You're the leader" : "You're in the party") : null;
@@ -432,13 +541,14 @@ const EventRow = memo(function EventRow({
     describeDistance(event.distanceM),
     party,
     status,
+    hot ? 'Hotspot, bonus XP' : null,
   ]
     .filter(Boolean)
     .join('. ');
 
   return (
     <Pressable
-      onPress={() => onSelect(event.id)}
+      onPress={() => onSelect('event', event.id)}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint="Opens the quest details"
@@ -451,6 +561,7 @@ const EventRow = memo(function EventRow({
         <View style={styles.rowBadges}>
           <TierBadge tier={event.difficultyTier} />
           <XpBadge maxXp={event.maxXp} />
+          {hot ? <HotspotBadge /> : null}
         </View>
         <ThemedText type="small" themeColor="textSecondary">
           {formatEventTime(event.scheduledStart, event.scheduledEnd)}
@@ -472,6 +583,75 @@ const EventRow = memo(function EventRow({
     </Pressable>
   );
 });
+
+const QuestRow = memo(function QuestRow({
+  quest,
+  hot,
+  onSelect,
+}: {
+  quest: NearbyQuest;
+  hot: boolean;
+  onSelect: (kind: PinKind, id: string) => void;
+}) {
+  const label = [
+    quest.title,
+    `${TIER_LABELS[quest.difficultyTier]} difficulty`,
+    'No party yet',
+    describeDistance(quest.distanceM),
+    hot ? 'Hotspot, bonus XP' : null,
+  ]
+    .filter(Boolean)
+    .join('. ');
+
+  return (
+    <Pressable
+      onPress={() => onSelect('quest', quest.id)}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint="Opens the quest details"
+      style={squish(styles.row)}>
+      <SitePhoto photo={quest.photo} tier={quest.difficultyTier} style={styles.thumbnail} />
+      <View style={styles.rowText}>
+        <ThemedText themeColor="text" style={[displayStyles.base, styles.rowTitle]} numberOfLines={2}>
+          {quest.title}
+        </ThemedText>
+        <View style={styles.rowBadges}>
+          <TierBadge tier={quest.difficultyTier} />
+          {hot ? <HotspotBadge /> : null}
+        </View>
+        <View style={styles.meta}>
+          <ThemedText type="small" themeColor="textSecondary">
+            {formatDistance(quest.distanceM)}
+          </ThemedText>
+          <ThemedText type="smallBold" themeColor="text">
+            No party yet
+          </ThemedText>
+        </View>
+      </View>
+    </Pressable>
+  );
+});
+
+// Explains the glows on the map. The swatches echo them; the words carry the meaning.
+function HotspotLegend() {
+  const theme = useTheme();
+  return (
+    <View style={styles.legend}>
+      <View style={styles.legendItem}>
+        <View style={[styles.swatch, styles.swatchWarm]} />
+        <ThemedText type="small" themeColor="textSecondary">
+          Reported recently
+        </ThemedText>
+      </View>
+      <View style={styles.legendItem}>
+        <View style={[styles.swatch, { backgroundColor: theme.ember }]} />
+        <ThemedText type="small" themeColor="textSecondary">
+          Hotspot: reported by 3 or more people, earns bonus XP
+        </ThemedText>
+      </View>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -503,6 +683,29 @@ const styles = StyleSheet.create({
   listTitle: {
     fontSize: 26,
     lineHeight: 32,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    lineHeight: 26,
+    paddingTop: Spacing.three,
+  },
+  legend: {
+    gap: Spacing.one,
+    paddingTop: Spacing.two,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  swatch: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  swatchWarm: {
+    // The map's glow for areas still warming up, matched by eye.
+    backgroundColor: '#FFB27A',
   },
   status: {
     marginTop: Spacing.four,

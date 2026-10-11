@@ -308,6 +308,7 @@ XP keeps counting past level 15 for the leaderboards.
 - **Compression.** Both hypertables move older chunks to compressed columnar storage: activity after 7 days and pings after 1 day.
 - **Leaderboards.** A daily continuous aggregate, with weekly and monthly rolled up from it, serves the daily, weekly and monthly leaderboards. All-time XP is a column on the user.
 - **Hotspots.** A continuous aggregate counts reports per area and reporter; a 30-day view counts distinct reporters for the hotspot map and the hotspot bonus.
+  The hotspot map is a layer on the Quests map (see [Quests map](#quests-map)).
 - **Dashboard (not built yet).** Cleanups per week, bags collected, volunteer-hours, active volunteers and re-report rate, grouped by larger H3 cells instead of neighborhoods.
 - **Geospatial.** PostGIS `geography`, GiST indexes and `ST_DWithin` for "near me" and the check-in geofence.
 
@@ -330,6 +331,19 @@ Why Flash-Lite:
 - Gemini 3.8 Flash costs about 2.5 times as much per input token, more until its launch pricing ends on January 1, 2027, and took 3 to 4 seconds or timed out in the same test.
 - The risk is missing small hazards such as needles.
   The reporter confirms every tag, and `photo_analysis` records the model, so switching `GEMINI_MODEL` is a one-line change if a test set shows Flash-Lite missing hazards.
+
+## Quests map
+
+The Quests tab is a full-screen map of NYC with the quest list in a bottom sheet over it.
+
+- Scheduled parties show as XP bubbles in their difficulty color.
+- Open quests with no upcoming party show as waypoints: a diamond with a "!" in their difficulty color, like a quest giver in a game.
+  Tapping one opens the quest with its photo, hazards, directions and a button to schedule the first party, which makes you its leader.
+- Areas reported in the last 30 days glow like embers, and bigger when more people reported them.
+  Hotspots, reported by 3 or more different people, glow brighter and slowly pulse, unless Reduce Motion is on.
+  Zoomed in to street level, the glow fades and the area's H3 hexagon shows: solid for hotspots, dashed for areas still warming up.
+- Quests and parties in a hotspot get a Hotspot badge, because cleaning them up earns bonus XP.
+- The list shows parties first, then quests that still need a party, and a legend explains the glows.
 
 ## Directions handoff
 
@@ -366,7 +380,7 @@ The core loop ships first so there is always a working demo.
 
 1. Set up the project, the Tiger Data schema and the activity-log hypertable with area snapping. (Done)
 2. Report and quest creation, with photo upload. (API done)
-3. Map and list views, plus party sign-up and check-in. (Scheduled parties done in the API)
+3. Map and list views, plus party sign-up and check-in. (Map and list with parties, quest waypoints and hotspots done; check-in done in the API)
 4. Ending a party with bag count and after photo, then XP and the leaderboard. (Scheduled parties and leaderboards done in the API)
 5. Gemini photo analysis, the tier rules and the equipment lookup. (Done in the API)
 6. Hotspot aggregate and bonus XP. (Done in the API)

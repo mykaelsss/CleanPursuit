@@ -45,8 +45,6 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
   const where = event.placeName ?? (lookup ? (lookup.address ?? 'Pinned on the map') : 'Finding address…');
   const partySize = detail?.attendeeCount ?? event.attendeeCount;
   const duration = formatDuration(event.scheduledStart, event.scheduledEnd);
-  const [viewingPhoto, setViewingPhoto] = useState(false);
-  const photoLabel = `Photo of the cleanup site for ${event.title}`;
 
   useEffect(() => {
     if (event.placeName) return;
@@ -59,24 +57,7 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
 
   return (
     <View style={styles.container}>
-      <View style={styles.titleRow}>
-        <ThemedText
-          ref={titleRef}
-          accessibilityRole="header"
-          themeColor="text"
-          style={[displayStyles.base, styles.title]}>
-          {event.title}
-        </ThemedText>
-        <Pressable
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Close quest details"
-          style={squish([styles.closeButton, { backgroundColor: theme.backgroundElement, borderColor: theme.border }])}>
-          <ThemedText type="smallBold" themeColor="text">
-            Close
-          </ThemedText>
-        </Pressable>
-      </View>
+      <CardTitle title={event.title} onClose={onClose} titleRef={titleRef} />
 
       <View style={styles.badges}>
         <TierBadge tier={event.difficultyTier} />
@@ -89,25 +70,7 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
         ) : null}
       </View>
 
-      <Pressable
-        onPress={() => setViewingPhoto(true)}
-        accessibilityRole="imagebutton"
-        accessibilityLabel={photoLabel}
-        accessibilityHint="Opens the photo full screen"
-        style={squish(styles.photoButton)}>
-        <SitePhoto photo={event.photo} tier={event.difficultyTier} style={styles.photo} />
-        <View style={[styles.enlarge, { backgroundColor: theme.ink }]}>
-          <ThemedText type="smallBold" style={{ color: theme.onInk }}>
-            Tap to enlarge
-          </ThemedText>
-        </View>
-      </Pressable>
-      <PhotoViewer
-        photo={event.photo}
-        visible={viewingPhoto}
-        onClose={() => setViewingPhoto(false)}
-        label={photoLabel}
-      />
+      <SitePhotoButton photo={event.photo} tier={event.difficultyTier} title={event.title} />
 
       {/* The reward and the button that claims it, together on an ink panel. */}
       <View style={[styles.reward, { backgroundColor: theme.ink }]}>
@@ -224,6 +187,60 @@ export function EventCard({ event, detail, busy, error, onJoin, onLeave, onClose
   );
 }
 
+// The card's title with its Close button.
+export function CardTitle({ title, onClose, titleRef }: { title: string; onClose: () => void; titleRef?: Ref<Text> }) {
+  const theme = useTheme();
+  return (
+    <View style={styles.titleRow}>
+      <ThemedText ref={titleRef} accessibilityRole="header" themeColor="text" style={[displayStyles.base, styles.title]}>
+        {title}
+      </ThemedText>
+      <Pressable
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close quest details"
+        style={squish([styles.closeButton, { backgroundColor: theme.backgroundElement, borderColor: theme.border }])}>
+        <ThemedText type="smallBold" themeColor="text">
+          Close
+        </ThemedText>
+      </Pressable>
+    </View>
+  );
+}
+
+// The large site photo on a card, which opens full screen when tapped.
+export function SitePhotoButton({
+  photo,
+  tier,
+  title,
+}: {
+  photo: CleanupEvent['photo'];
+  tier: DifficultyTier;
+  title: string;
+}) {
+  const theme = useTheme();
+  const [viewing, setViewing] = useState(false);
+  const label = `Photo of the cleanup site for ${title}`;
+  return (
+    <>
+      <Pressable
+        onPress={() => setViewing(true)}
+        accessibilityRole="imagebutton"
+        accessibilityLabel={label}
+        accessibilityHint="Opens the photo full screen"
+        style={squish(styles.photoButton)}>
+        <SitePhoto photo={photo} tier={tier} style={styles.photo} />
+        <View style={[styles.enlarge, { backgroundColor: theme.ink }]}>
+          <ThemedText type="smallBold" style={{ color: theme.onInk }}>
+            Tap to enlarge
+          </ThemedText>
+        </View>
+      </Pressable>
+      <PhotoViewer photo={photo} visible={viewing} onClose={() => setViewing(false)} label={label} />
+    </>
+  );
+}
+
 // The site photo in a frame of its difficulty color, like loot of that rarity, tinted while it loads.
 // Pass `label` to describe the photo to screen readers. Leave it out when the photo only decorates
 // something that is already labeled, such as a list row, so it is skipped.
@@ -251,7 +268,7 @@ export function SitePhoto({
 }
 
 // A label and its value, read together as one item by screen readers.
-function Fact({ label, value, spokenValue }: { label: string; value: string; spokenValue?: string }) {
+export function Fact({ label, value, spokenValue }: { label: string; value: string; spokenValue?: string }) {
   const { fontScale } = useWindowDimensions();
   const stacked = fontScale >= STACK_FONT_SCALE;
   return (

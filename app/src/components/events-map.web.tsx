@@ -10,7 +10,16 @@ import { useTheme } from '@/hooks/use-theme';
 import { LEAFLET_MAP_HTML, type MapCommand, parseMapEvent, useMapUpdate } from '@/lib/leaflet-map-html';
 
 // The Leaflet map page (see leaflet-map-html.ts) in an iframe, talking over postMessage.
-export function EventsMap({ events, selectedId, onSelect, center, userLocation, bottomPadding }: EventsMapProps) {
+export function EventsMap({
+  events,
+  quests,
+  hotspots,
+  selected,
+  onSelect,
+  center,
+  userLocation,
+  bottomPadding,
+}: EventsMapProps) {
   const frame = useRef<HTMLIFrameElement>(null);
   const ready = useRef(false);
   const latest = useRef<{ update: MapCommand | null; center: EventsMapProps['center'] }>({ update: null, center: null });
@@ -21,7 +30,9 @@ export function EventsMap({ events, selectedId, onSelect, center, userLocation, 
 
   const update = useMapUpdate({
     events,
-    selectedId,
+    quests,
+    hotspots,
+    selected,
     user: userLocation,
     bottomPadding,
     reduceMotion,
@@ -55,7 +66,7 @@ export function EventsMap({ events, selectedId, onSelect, center, userLocation, 
         if (latest.current.update) send(latest.current.update);
         if (latest.current.center) send({ type: 'center', ...latest.current.center });
       } else if (event?.type === 'select') {
-        onSelect(event.id);
+        onSelect(event.kind, event.id);
       } else if (event?.type === 'error') {
         setLoadError(event.message);
       }
@@ -69,7 +80,7 @@ export function EventsMap({ events, selectedId, onSelect, center, userLocation, 
       <iframe
         ref={frame}
         srcDoc={LEAFLET_MAP_HTML}
-        title="Map of cleanup events"
+        title="Map of quests, cleanup parties and hotspots"
         style={{ border: 0, width: '100%', height: '100%' }}
       />
       {loadError && (

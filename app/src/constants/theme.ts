@@ -45,6 +45,11 @@ export const Colors = {
     earth: '#B58B62',
     border: '#CBE5BB',
 
+    // Hotspots glow like embers on the quests map. ember is for small marks and text on background.
+    ember: '#C2410C',
+    emberSoft: '#FFE6D5',
+    onEmberSoft: '#9A3412',
+
     badge: '#8DD9C0',
     onBadge: '#243B35',
 
@@ -92,6 +97,10 @@ export const Colors = {
 
     earth: '#C9A37A',
     border: '#466273',
+
+    ember: '#FF8A4C',
+    emberSoft: '#5A2A14',
+    onEmberSoft: '#FFC9A8',
 
     badge: '#8DD9C0',
     onBadge: '#243B35',

@@ -110,6 +110,8 @@ export interface CleanupEvent {
   location: { latitude: number; longitude: number };
   // A readable name the reporter gave the spot; null on older reports.
   placeName: string | null;
+  // The report's H3 area, to match against hotspots.
+  areaId: string;
   difficultyTier: DifficultyTier;
   status: 'scheduled' | 'active';
   scheduledStart: string;
@@ -123,6 +125,36 @@ export interface CleanupEvent {
 }
 
 export type NearbyEvent = CleanupEvent & { distanceM: number };
+
+// An open quest as it appears on the map and in lists, from GET /quests.
+export interface NearbyQuest {
+  id: string;
+  title: string;
+  status: Quest['status'];
+  difficultyTier: DifficultyTier;
+  location: LocationPoint;
+  placeName: string | null;
+  distanceM: number;
+  areaId: string;
+  // Hazard codes, such as `sharps`.
+  hazards: string[];
+  photo: { id: string; url: string };
+  createdAt: string;
+}
+
+// An H3 area reported in the last 30 days, from GET /hotspots.
+export interface HotspotArea {
+  areaId: string;
+  latitude: number;
+  longitude: number;
+  // The hexagon's corners.
+  boundary: LocationPoint[];
+  distinctReporters: number;
+  reports: number;
+  lastReportedDay: string;
+  // Reported by enough different people that cleaning it earns bonus XP.
+  isHotspot: boolean;
+}
 
 export interface Attendee {
   user: { id: string; username: string };

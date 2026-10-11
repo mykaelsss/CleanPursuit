@@ -15,35 +15,42 @@ type ScheduleStepProps = {
 };
 
 export default function ScheduleStep({ value, onChange }: ScheduleStepProps) {
-  const theme = useTheme();
-
   return (
     <AppCard>
       <StepHeading number={4} title="SCHEDULE THE PARTY" />
       <ThemedText type="small" themeColor="textSecondary">
         Pick a future start and a later end on the same date, up to 12 hours apart. Times use the time zone on your device.
       </ThemedText>
-      <View style={styles.fieldGroup}>
-        <View style={styles.label}>
-          <QuestIcon name="calendar" color={theme.tint} size={20} />
-          <ThemedText type="smallBold">Choose a date</ThemedText>
-        </View>
-
-        <View style={[styles.calendar, { backgroundColor: theme.background, borderColor: theme.border }]}>
-          <CalendarPicker
-            schedule={value}
-            onDateChange={(date) => onChange({ ...value, date })}
-          />
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <TimeRangeInput
-            start={value.start}
-            end={value.end}
-            onStartChange={(start) => onChange({ ...value, start })}
-            onEndChange={(end) => onChange({ ...value, end })}
-          />
-        </View>
-      </View>
+      <ScheduleFields value={value} onChange={onChange} />
     </AppCard>
+  );
+}
+
+// The date and time pickers on their own, for scheduling a party outside the create flow.
+export function ScheduleFields({ value, onChange }: ScheduleStepProps) {
+  const theme = useTheme();
+
+  return (
+    <View style={styles.fieldGroup}>
+      <View style={styles.label}>
+        <QuestIcon name="calendar" color={theme.tint} size={20} />
+        <ThemedText type="smallBold">Choose a date</ThemedText>
+      </View>
+
+      <View style={[styles.calendar, { backgroundColor: theme.background, borderColor: theme.border }]}>
+        <CalendarPicker
+          schedule={value}
+          onDateChange={(date) => onChange({ ...value, date })}
+        />
+        <View style={[styles.divider, { backgroundColor: theme.border }]} />
+        <TimeRangeInput
+          start={value.start}
+          end={value.end}
+          onStartChange={(start) => onChange({ ...value, start })}
+          onEndChange={(end) => onChange({ ...value, end })}
+        />
+      </View>
+    </View>
   );
 }
 
