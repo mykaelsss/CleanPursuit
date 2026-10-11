@@ -183,15 +183,16 @@ Bounty rules:
   A quest has at most one walk-up under way.
 - People come and go as they like while the walk-up is under way.
   A member can leave with `POST /parties/{id}/leave` and check in again later, keeping their first check-in time.
-- A person is in at most one walk-up at a time, so checking in to another quest's walk-up leaves the first one.
-  `GET /me/walk-up` returns the walk-up the signed-in user is checked in to, so the app can keep sending location pings after it restarts.
+- A person is at one cleanup at a time, walk-up or event, so checking in to one leaves any other party they are checked in to.
+  `GET /me/party` returns the active party the signed-in user is checked in to, so the app can keep sending location pings after it restarts.
 - A walk-up can start at any time, including before a scheduled event on the same quest.
   If it completes the quest, the quest's events that have not started are cancelled.
 - Each quest and event shows its quest's walk-up under way, with the leader and how many members are on site, or none.
 - In the app, a bounty is not a separate screen.
   Quest and event cards on the quests map show a Live badge with the number on site, and the spot ripples on the map.
-  The quest card offers checking in to start or join the walk-up, next to scheduling a party for later, and the event card offers checking in before the party starts.
+  The quest card offers checking in to start or join the walk-up, next to scheduling a party for later, and the event card offers checking in to the walk-up before the party starts.
   While checked in, the card shows who leads, whether the last ping was on site, a leave button, and for the leader an end form with the after photo, bag count and outcome.
+  The card shows how the party ended once it is over, and warns before a check-in that it leaves the user's other cleanup.
 - A walk-up that nobody is still at is abandoned without XP, and the next check-in starts a new one.
 - The leader ends a walk-up the same way as an event.
   After a partial cleanup the quest stays open for the next walk-up or event.
@@ -204,6 +205,10 @@ Event rules:
 - The organizer cannot withdraw from their own event, but can call it off with `POST /events/{id}/cancel` until someone checks in.
   After that, the leader ends it instead.
 - A member who checked in can leave with `POST /parties/{id}/leave` and check in again before the scheduled end, keeping their first check-in time.
+- In the app, the event card offers members checking in from the scheduled start until the scheduled end, with the same checked-in panel and end form as a walk-up.
+  After the scheduled end it says check-in has closed, but a leader still on site can end the event.
+- The events list keeps an event past its scheduled end while someone is still on site, so the leader can find it and end it.
+  `GET /events/{id}` also returns ended events, with their status and the user's own membership status, so an open card can show how it ended.
 - Only the organizer can see attendees' email addresses.
 - The API has two routes that schedule parties.
   `POST /quests/{id}/events` applies the rules above.
@@ -232,7 +237,7 @@ Handing the role off on purpose is not built.
   The number is a temporary MVP value, to revisit after end-to-end demo testing.
 - The first check-in makes an event active; a walk-up is active from its first check-in.
 - The app sends location pings during the party, about once a minute.
-  For walk-ups it sends them while the app is open, from any screen; it does not ping in the background yet.
+  It sends them for walk-ups and events while the app is open, from any screen; it does not ping in the background yet.
 - Time on site adds up the gaps between consecutive pings that were both on site.
   A gap with an off-site ping at either end does not count, and one gap counts for at most 10 minutes, so stepping away or dropping signal does not earn time.
   Nothing counts before check-in, after an event's scheduled end or after the party ends.
@@ -298,6 +303,19 @@ On an easy walk-up, an hour on site earns 100 XP and 30 minutes earns 50; on a l
 A member who earns the tier's full base XP gets no hotspot bonus, because the bonus cannot push the total past the tier maximum.
 
 The rules live in `server/src/lib/xp.ts`.
+
+### XP popup
+
+Everyone who checked in sees a popup with the XP they earned once the party ends, whether or not they ended it themselves.
+
+- `GET /me/rewards` lists the user's ended parties whose reward they have not seen, with the outcome, leader, bag count, time on site, base XP, hotspot bonus and total.
+  It also says whether the user is still checked in to a party under way, so the app knows to keep checking.
+- `POST /me/rewards/{partyId}/seen` marks a reward seen, so the popup shows once per party and person, on any device.
+- The app checks for rewards when the user signs in, when it comes back to the foreground, after leaving or ending a party, and every minute while a party they are in is under way.
+- The popup counts the XP up with light rays and a burst of sparkles, and lists the time on site, any hotspot bonus and the bags filled.
+  With reduced motion it shows the total at once.
+- A member who checked in but earned 0 XP still sees the popup, which explains that XP comes from time on site.
+- Abandoned and cancelled parties have no reward.
 The event card's "up to" figure and each quest's `maxXp` are the tier maximum.
 
 The Leaderboard tab uses `GET /leaderboards` to show daily, weekly, monthly and all-time XP, with all time selected initially.
@@ -419,8 +437,8 @@ The core loop ships first so there is always a working demo.
 
 1. Set up the project, the Tiger Data schema and the activity-log hypertable with area snapping. (Done)
 2. Report and quest creation, with photo upload. (API done)
-3. Map and list views, plus party sign-up and check-in. (Map and list with parties, quest waypoints and hotspots done; check-in done in the API)
-4. Ending a party with bag count and after photo, then XP and the leaderboard. (Scheduled parties and leaderboards done in the API)
+3. Map and list views, plus party sign-up and check-in. (Done)
+4. Ending a party with bag count and after photo, then XP and the leaderboard. (Done, with the XP popup)
 5. Gemini photo analysis, the tier rules and the equipment lookup. (Done in the API)
 6. Hotspot aggregate and bonus XP. (Done in the API)
 7. Biohazard drop-off map with directions links, and the resources page. (Drop-off list, directions and resources page done; the map needs a development build)
@@ -442,8 +460,9 @@ The core loop ships first so there is always a working demo.
 
 Done:
 
-- Schema migrations `001` to `009` are applied to the DEV Tiger service and tested.
-- API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, quests, events and scheduled parties with GPS check-in and presence, walk-up parties on bounties with leader handoff, timeouts and abandoning, ending a party with XP from presence pings and the hotspot bonus, daily, weekly, monthly and all-time leaderboards, hotspots, equipment and drop-offs.
+- Schema migrations `001` to `010` are applied to the DEV Tiger service and tested.
+- API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, quests, events and scheduled parties with GPS check-in and presence, walk-up parties on bounties with leader handoff, timeouts and abandoning, ending a party with XP from presence pings and the hotspot bonus, daily, weekly, monthly and all-time leaderboards, hotspots, equipment and drop-offs, and unseen rewards for the XP popup.
+- App: check-in, location pings, leaving and ending for walk-ups and events, and the XP popup for everyone who checked in.
 - 196 sharps drop-off sites imported from NYC Open Data.
 - Region: New York City (the five boroughs) for seed data, drop-off locations, escalation contacts and the resources page.
 
@@ -458,7 +477,10 @@ Open:
 - [x] Walk-up parties on bounties, with leader handoff, the 30-minute presence timeout and abandoning.
 - [x] Walk-up screens in the app: check in, location pings, leave and end.
 - [ ] Location pings while the app is in the background.
-- [ ] Check-in, location pings, leaving, calling off and ending for events in the app.
+- [x] Check-in, location pings, leaving and ending for events in the app.
+- [ ] Calling off an event in the app.
+- [ ] An organizer who never checks in stays the leader, so nobody else can end the event.
+- [x] An XP popup for everyone who checked in, once the party ends.
 - [x] For events: leaving after check-in, leader handoff, the presence timeout and calling one off.
 - [x] Ending a party that is under way when another party completes its quest.
 - [x] Daily, weekly and monthly leaderboards in the API.

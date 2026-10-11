@@ -139,6 +139,25 @@ export interface Party {
   createdAt: string;
 }
 
+// XP earned from a party that ended with an after photo, from GET /me/rewards. Shown once to everyone who
+// checked in, then marked seen.
+export interface Reward {
+  partyId: string;
+  questId: string;
+  questTitle: string;
+  // `completed` when the party finished the quest.
+  outcome: 'completed' | 'partial';
+  walkUp: boolean;
+  leader: { id: string; username: string };
+  endedAt: string;
+  bagCount: number;
+  minutesOnSite: number;
+  baseXp: number;
+  // The hotspot bonus.
+  bonusXp: number;
+  xp: number;
+}
+
 export type AuthedRequest = <T>(path: string, options?: { method?: string; body?: unknown }) => Promise<T>;
 
 // An event is a scheduled cleanup on a quest. The organizer is the party leader.
@@ -153,7 +172,8 @@ export interface CleanupEvent {
   // The report's H3 area, to match against hotspots.
   areaId: string;
   difficultyTier: DifficultyTier;
-  status: 'scheduled' | 'active';
+  // `active` once someone has checked in. Only GET /events/{id} returns events that have ended.
+  status: Party['status'];
   scheduledStart: string;
   scheduledEnd: string;
   organizer: { id: string; username: string };
@@ -161,6 +181,8 @@ export interface CleanupEvent {
   photo: { id: string; url: string };
   attendeeCount: number;
   joined: boolean;
+  // The signed-in user's membership. `left` members can check in again until the scheduled end.
+  myStatus: PartyMember['status'] | null;
   isOrganizer: boolean;
   // A walk-up cleanup under way on the event's quest, which anyone at the spot can join now.
   walkUp: WalkUp | null;

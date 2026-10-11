@@ -6,9 +6,10 @@ import Svg, { Path } from 'react-native-svg';
 import { ScheduleFields } from '@/components/create-quest/schedule-step';
 import { createInitialSchedule, isValidSchedule, scheduleDates } from '@/components/create-quest/schedule-utils';
 import { CardTitle, Fact, SitePhotoButton } from '@/components/event-card';
+import { EndedPanel, type PartyChange } from '@/components/party-panel';
 import { displayStyles, squish, TierBadge } from '@/components/quest-ui';
 import { ThemedText } from '@/components/themed-text';
-import { WalkUpPanel, type WalkUpChange } from '@/components/walk-up-panel';
+import { WalkUpPanel } from '@/components/walk-up-panel';
 import { MIN_TOUCH, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { NearbyQuest, Quest } from '@/lib/api';
@@ -24,7 +25,7 @@ interface QuestCardProps {
   busy: boolean;
   error: string | null;
   onSchedule: (start: Date, end: Date) => void;
-  onWalkUpChange: (change: WalkUpChange) => void;
+  onPartyChange: (change: PartyChange) => void;
   onClose: () => void;
   // The title, so the screen can move screen reader focus to it when the card opens.
   titleRef?: Ref<Text>;
@@ -39,7 +40,7 @@ export function QuestCard({
   busy,
   error,
   onSchedule,
-  onWalkUpChange,
+  onPartyChange,
   onClose,
   titleRef,
 }: QuestCardProps) {
@@ -56,6 +57,8 @@ export function QuestCard({
   const needsDropoff = hazards.some((hazard) => hazard.requiresDropoff);
   // The detail is fresher than the list once it has loaded.
   const walkUp = detail ? detail.walkUp : quest.walkUp;
+  // Someone finished the quest while the card was open.
+  const completed = detail?.status === 'completed';
 
   useEffect(() => {
     if (quest.placeName) return;
@@ -84,31 +87,35 @@ export function QuestCard({
       <SitePhotoButton photo={quest.photo} tier={quest.difficultyTier} title={quest.title} />
 
       {/* Anyone at the spot can start cleaning now; a party can still be scheduled for later. */}
-      <WalkUpPanel
-        questId={quest.id}
-        walkUp={walkUp}
-        maxXp={quest.maxXp}
-        hot={hot}
-        tone="ink"
-        idle={{
-          title: 'No party yet',
-          text: "Here now? Check in to start cleaning, and anyone who comes by can join. Or schedule a party for later and you'll lead it.",
-          action: 'Check in and start',
-        }}
-        onChange={onWalkUpChange}>
-        {scheduling ? null : (
-          <Pressable
-            onPress={() => setScheduling(true)}
-            accessibilityRole="button"
-            style={squish([styles.secondaryButton, { borderColor: theme.onInkSoft }])}>
-            <ThemedText type="smallBold" style={{ color: theme.onInk }}>
-              Schedule a party for later
-            </ThemedText>
-          </Pressable>
-        )}
-      </WalkUpPanel>
+      {completed ? (
+        <EndedPanel status="completed" tone="ink" />
+      ) : (
+        <WalkUpPanel
+          questId={quest.id}
+          walkUp={walkUp}
+          maxXp={quest.maxXp}
+          hot={hot}
+          tone="ink"
+          idle={{
+            title: 'No party yet',
+            text: "Here now? Check in to start cleaning, and anyone who comes by can join. Or schedule a party for later and you'll lead it.",
+            action: 'Check in and start',
+          }}
+          onChange={onPartyChange}>
+          {scheduling ? null : (
+            <Pressable
+              onPress={() => setScheduling(true)}
+              accessibilityRole="button"
+              style={squish([styles.secondaryButton, { borderColor: theme.onInkSoft }])}>
+              <ThemedText type="smallBold" style={{ color: theme.onInk }}>
+                Schedule a party for later
+              </ThemedText>
+            </Pressable>
+          )}
+        </WalkUpPanel>
+      )}
 
-      {scheduling ? (
+      {scheduling && !completed ? (
         <View style={styles.scheduler}>
           <ThemedText type="small" themeColor="textSecondary">
             Pick a future start and a later end on the same date, up to 12 hours apart.

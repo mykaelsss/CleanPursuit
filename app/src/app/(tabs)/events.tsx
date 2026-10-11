@@ -31,7 +31,7 @@ import { EventsMap } from '@/components/events-map';
 import { HotspotBadge, QuestCard } from '@/components/quest-card';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import type { WalkUpChange } from '@/components/walk-up-panel';
+import type { PartyChange } from '@/components/party-panel';
 import { BottomTabInset, MIN_TOUCH, Spacing } from '@/constants/theme';
 import { useAnnounce } from '@/hooks/use-announce';
 import { useTheme } from '@/hooks/use-theme';
@@ -39,6 +39,7 @@ import { ApiError, type EventDetail, type HotspotArea, type NearbyEvent, type Ne
 import { useAuth } from '@/lib/auth';
 import { describeDistance, describeEventTime, formatDistance, formatEventTime, TIER_LABELS } from '@/lib/event-format';
 import type { MapSelection, PinKind } from '@/lib/leaflet-map-html';
+import { useLiveParty } from '@/lib/live-party';
 import { isInNyc, NYC_REGION } from '@/lib/nyc';
 
 type Point = { latitude: number; longitude: number };
@@ -93,6 +94,7 @@ function focus(ref: RefObject<Text | null>) {
 
 export default function EventsScreen() {
   const { authedRequest } = useAuth();
+  const { party: liveParty } = useLiveParty();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -227,8 +229,8 @@ export default function EventsScreen() {
   // A completed quest leaves the list, so after a cleanup ends the list reloads when the card closes,
   // and the card can show the result until then.
   const reloadOnClose = useRef(false);
-  const onWalkUpChange = useCallback(
-    (change: WalkUpChange) => {
+  const onPartyChange = useCallback(
+    (change: PartyChange) => {
       if (change === 'ended') {
         reloadOnClose.current = true;
         return;
@@ -238,6 +240,18 @@ export default function EventsScreen() {
     },
     [reloadSelected, loadEvents],
   );
+
+  // The user's cleanup ended or changed elsewhere, such as its leader ending it, so the open card
+  // catches up, and the list does once the card closes.
+  const livePartyId = liveParty?.id ?? null;
+  const lastLivePartyId = useRef(livePartyId);
+  useEffect(() => {
+    const previous = lastLivePartyId.current;
+    lastLivePartyId.current = livePartyId;
+    if (!previous || previous === livePartyId) return;
+    reloadOnClose.current = true;
+    reloadSelected();
+  }, [livePartyId, reloadSelected]);
 
   // Move screen reader focus with the selection, once the list is shown or hidden again: to the new title
   // when another pin is picked while the card is open, and back to the list when the card closes.
@@ -502,7 +516,7 @@ export default function EventsScreen() {
               error={cardError}
               onJoin={() => changeAttendance('POST')}
               onLeave={() => changeAttendance('DELETE')}
-              onWalkUpChange={onWalkUpChange}
+              onPartyChange={onPartyChange}
               onClose={closeCard}
               titleRef={cardTitle}
             />
@@ -516,7 +530,7 @@ export default function EventsScreen() {
               busy={busy}
               error={cardError}
               onSchedule={scheduleParty}
-              onWalkUpChange={onWalkUpChange}
+              onPartyChange={onPartyChange}
               onClose={closeCard}
               titleRef={cardTitle}
             />

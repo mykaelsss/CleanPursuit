@@ -6,7 +6,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider, useAuth } from '@/lib/auth';
-import { WalkUpProvider } from '@/lib/walk-up';
+import { LivePartyProvider } from '@/lib/live-party';
+import { RewardsProvider } from '@/lib/rewards';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -19,9 +20,12 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <AuthProvider>
-          <WalkUpProvider>
-            <RootNavigator fontsReady={fontsLoaded || !!fontError} />
-          </WalkUpProvider>
+          {/* Shows the XP popup over any screen, and hears from the live party when a cleanup ends. */}
+          <RewardsProvider>
+            <LivePartyProvider>
+              <RootNavigator fontsReady={fontsLoaded || !!fontError} />
+            </LivePartyProvider>
+          </RewardsProvider>
         </AuthProvider>
       </ThemeProvider>
     </GestureHandlerRootView>
