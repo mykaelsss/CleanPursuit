@@ -3,10 +3,10 @@ import { randomBytes } from 'node:crypto';
 import { after, describe, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
-import { fakeAnalyzer, fakePool, fakeStorage, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakePlaces, fakePool, fakeStorage, testEnv as env } from './helpers.ts';
 
 test('GET /leaderboard without a token returns 401', async () => {
-  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer() });
+  const app = await buildApp({ env, pool: fakePool(), storage: fakeStorage(), analyzer: fakeAnalyzer(), places: fakePlaces() });
   try {
     const res = await app.inject({ method: 'GET', url: '/leaderboard' });
     assert.equal(res.statusCode, 401);
@@ -31,7 +31,7 @@ describe('leaderboard', { skip }, () => {
 
   test('ranks users by XP, most first, with ties sharing a rank', async (t) => {
     const pool = createPool(env.DATABASE_URL);
-    const app = await buildApp({ env, pool, storage: fakeStorage(), analyzer: fakeAnalyzer() });
+    const app = await buildApp({ env, pool, storage: fakeStorage(), analyzer: fakeAnalyzer(), places: fakePlaces() });
     t.after(() => app.close());
 
     // XP far above demo users. The period leaderboard tests may create higher

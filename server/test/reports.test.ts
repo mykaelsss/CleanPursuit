@@ -3,10 +3,13 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { after, describe, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
+import { PlacesFailedError } from '../src/lib/places.ts';
 import {
   type FakeAnalyzer,
+  type FakePlaces,
   type FakeStorage,
   fakeAnalyzer,
+  fakePlaces,
   fakeStorage,
   PNG_BYTES,
   testEnv as env,
@@ -17,14 +20,19 @@ import {
 const skip = process.env.DATABASE_URL ? false : 'needs DATABASE_URL; run with `infisical run -- npm test`';
 
 const createdUserIds: string[] = [];
+const createdDropoffIds: string[] = [];
 
 type App = Awaited<ReturnType<typeof buildApp>>;
 
-async function startApp(t: { after: (fn: () => Promise<unknown>) => void }, analyzer: FakeAnalyzer = fakeAnalyzer()) {
+async function startApp(
+  t: { after: (fn: () => Promise<unknown>) => void },
+  analyzer: FakeAnalyzer = fakeAnalyzer(),
+  places: FakePlaces = fakePlaces(),
+) {
   const storage = fakeStorage();
-  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer });
+  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer, places });
   t.after(() => app.close());
-  return { app, storage, analyzer };
+  return { app, storage, analyzer, places };
 }
 
 async function signUp(app: App) {
@@ -68,6 +76,43 @@ function postReport(app: App, authorization: string, payload: Record<string, unk
   return app.inject({ method: 'POST', url: '/reports', headers: { authorization }, payload });
 }
 
+async function createQuest(
+  app: App,
+  storage: FakeStorage,
+  authorization: string,
+  report: { location: { latitude: number; longitude: number }; hazards: string[] },
+): Promise<string> {
+  const created = await postReport(app, authorization, {
+    photoFileId: await uploadPhoto(app, storage, authorization),
+    description: 'Trash pile',
+    categories: ['mixed'],
+    ...report,
+  });
+  assert.equal(created.statusCode, 201);
+  const quest = await app.inject({
+    method: 'POST',
+    url: `/reports/${created.json().id}/quest`,
+    headers: { authorization },
+    payload: { title: 'Trash pile' },
+  });
+  assert.equal(quest.statusCode, 201);
+  return quest.json().id;
+}
+
+function getDropoffs(app: App, authorization: string, questId: string) {
+  return app.inject({ method: 'GET', url: `/quests/${questId}/dropoffs`, headers: { authorization } });
+}
+
+// A fake Places result `latitudeOffset` degrees north of a spot (0.001 degrees is about 111 m).
+function placeNear(spot: { latitude: number; longitude: number }, latitudeOffset: number, name: string) {
+  return {
+    id: `test_${randomBytes(6).toString('hex')}`,
+    name,
+    address: `${name} Street`,
+    location: { latitude: spot.latitude + latitudeOffset, longitude: spot.longitude },
+  };
+}
+
 describe('reports and quests', { skip }, () => {
   after(async () => {
     const pool = createPool(env.DATABASE_URL);
@@ -78,6 +123,11 @@ describe('reports and quests', { skip }, () => {
        WHERE created_by_user_id = ANY($1)
           OR report_id IN (SELECT id FROM report WHERE reporter_user_id = ANY($1))`,
       users,
+    );
+    // Saved drop-off lists went with the quests (ON DELETE CASCADE).
+    await pool.query(
+      `DELETE FROM dropoff_location WHERE id = ANY($1) OR google_place_id LIKE 'test\\_%'`,
+      [createdDropoffIds],
     );
     // Tags go with the report, and photo analyses with the file (ON DELETE CASCADE).
     await pool.query('DELETE FROM report WHERE reporter_user_id = ANY($1)', users);
@@ -96,6 +146,32 @@ describe('reports and quests', { skip }, () => {
     const sharps = hazards.find((h: { code: string }) => h.code === 'sharps');
     assert.equal(sharps.requiresDropoff, true);
     assert.ok(sharps.warning.length > 0);
+  });
+
+  test('photo-to-report recovery returns null before submission and only permits the uploader', async (t) => {
+    const { app, storage } = await startApp(t);
+    const owner = await signUp(app);
+    const other = await signUp(app);
+    const photoFileId = await uploadPhoto(app, storage, owner.authorization);
+    const lookup = (authorization: string) => app.inject({
+      method: 'GET', url: `/files/${photoFileId}/report`, headers: { authorization },
+    });
+    const unused = await lookup(owner.authorization);
+    assert.equal(unused.statusCode, 200);
+    assert.equal(unused.json(), null);
+    const submitted = await postReport(app, owner.authorization, {
+      photoFileId, description: 'Bottles by the gate', location: randomSpot(), categories: ['plastic'],
+    });
+    assert.equal(submitted.statusCode, 201);
+    const recovered = await lookup(owner.authorization);
+    assert.equal(recovered.statusCode, 200);
+    assert.equal(recovered.json().id, submitted.json().id);
+    assert.equal(recovered.json().photo.id, photoFileId);
+    const denied = await lookup(other.authorization);
+    assert.equal(denied.statusCode, 404);
+    assert.equal(denied.json().code, 'FILE_NOT_FOUND');
+    const unsigned = await app.inject({ method: 'GET', url: `/files/${photoFileId}/report` });
+    assert.equal(unsigned.statusCode, 401);
   });
 
   test('confirming the same upload twice returns the same file', async (t) => {
@@ -391,6 +467,94 @@ describe('reports and quests', { skip }, () => {
     ]);
   });
 
+  test('with no listed site nearby, drop-offs come from Places, looked up once per quest', async (t) => {
+    const spot = randomSpot();
+    const near = placeNear(spot, 0.003, 'Harm Reduction Center');
+    const far = placeNear(spot, 0.2, 'Too Far Clinic');
+    const { app, storage, places } = await startApp(t, fakeAnalyzer(), fakePlaces([far, near]));
+    const { authorization } = await signUp(app);
+    const questId = await createQuest(app, storage, authorization, { location: spot, hazards: ['sharps'] });
+
+    const res = await getDropoffs(app, authorization, questId);
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.requiresDropoff, true);
+    assert.equal(body.escalation.phone, '311');
+    assert.equal(body.dropoffs.length, 1, 'the site 22 km away is dropped');
+    const [dropoff] = body.dropoffs;
+    assert.equal(dropoff.name, 'Harm Reduction Center');
+    assert.equal(dropoff.googlePlaceId, near.id);
+    assert.equal(dropoff.verified, false);
+    assert.ok(dropoff.distanceM >= 325 && dropoff.distanceM <= 345, `distance ${dropoff.distanceM}`);
+    assert.equal(places.searches.length, 1);
+    assert.equal(places.searches[0]!.query, 'syringe service program');
+
+    // Later requests read the saved list and only refetch the place's details.
+    const again = await getDropoffs(app, authorization, questId);
+    assert.deepEqual(again.json().dropoffs, body.dropoffs);
+    assert.equal(places.searches.length, 1);
+    assert.deepEqual(places.detailLookups, [near.id, near.id]);
+  });
+
+  test('listed drop-off sites come before Places', async (t) => {
+    const spot = randomSpot();
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO dropoff_location (source, name, address, location, phone, hours, notes, verified_at)
+       VALUES ('seed', 'Test Hospital', '1 Test Ave', ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+               '555-0100', '9am-5pm', 'Lobby', now())
+       RETURNING id`,
+      [spot.longitude, spot.latitude + 0.002],
+    );
+    createdDropoffIds.push(rows[0]!.id);
+
+    const { app, storage, places } = await startApp(t, fakeAnalyzer(), fakePlaces([placeNear(spot, 0.001, 'Nope')]));
+    const { authorization } = await signUp(app);
+    const questId = await createQuest(app, storage, authorization, { location: spot, hazards: ['biohazard'] });
+
+    const res = await getDropoffs(app, authorization, questId);
+    assert.equal(res.statusCode, 200);
+    const [dropoff] = res.json().dropoffs;
+    assert.equal(dropoff.id, rows[0]!.id);
+    assert.equal(dropoff.name, 'Test Hospital');
+    assert.equal(dropoff.notes, 'Lobby');
+    assert.equal(dropoff.verified, true);
+    assert.equal(dropoff.googlePlaceId, null);
+    assert.equal(places.searches.length, 0);
+  });
+
+  test('quests without sharps or biohazard skip the lookup', async (t) => {
+    const { app, storage, places } = await startApp(t);
+    const { authorization } = await signUp(app);
+    const questId = await createQuest(app, storage, authorization, {
+      location: randomSpot(),
+      hazards: ['broken_glass'],
+    });
+
+    const res = await getDropoffs(app, authorization, questId);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().requiresDropoff, false);
+    assert.deepEqual(res.json().dropoffs, []);
+    assert.equal(places.searches.length, 0);
+  });
+
+  test('when Places fails, nothing is saved so the next request tries again', async (t) => {
+    const { app, storage } = await startApp(t, fakeAnalyzer(), fakePlaces([], new PlacesFailedError('down')));
+    const { authorization } = await signUp(app);
+    const questId = await createQuest(app, storage, authorization, { location: randomSpot(), hazards: ['sharps'] });
+
+    const res = await getDropoffs(app, authorization, questId);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json().dropoffs, []);
+    assert.equal(res.json().escalation.phone, '311');
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+    const { rows } = await pool.query(`SELECT dropoffs_fetched_at FROM quest WHERE id = $1`, [questId]);
+    assert.equal(rows[0].dropoffs_fetched_at, null);
+  });
+
   test('report and quest errors', async (t) => {
     const { app, storage } = await startApp(t);
     const owner = await signUp(app);
@@ -438,5 +602,9 @@ describe('reports and quests', { skip }, () => {
     });
     assert.equal(missingQuest.statusCode, 404);
     assert.equal(missingQuest.json().code, 'QUEST_NOT_FOUND');
+
+    const missingDropoffs = await getDropoffs(app, owner.authorization, randomUUID());
+    assert.equal(missingDropoffs.statusCode, 404);
+    assert.equal(missingDropoffs.json().code, 'QUEST_NOT_FOUND');
   });
 });

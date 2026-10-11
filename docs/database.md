@@ -13,8 +13,7 @@ For the product side, see [mvp.md](mvp.md).
 | Service | `clean-pursuit` (id `sm60nzjanh`), DEV, us-east-1 |
 | Postgres | 18.6, with built-in `uuidv7()` |
 | Extensions | TimescaleDB 2.30, PostGIS 3.6, h3 + h3_postgis 4.2 (pulls in postgis_raster), citext |
-| Applied | `001_initial_schema.sql`, `002_leaderboards_and_hotspots.sql`, `003_photo_analysis.sql`, `004_volume_estimates.sql`, `006_report_place_names.sql`, `007_equipment_seed.sql`, plus `005` from the `biohazard-dropoffs` branch |
-| Pending | `008_leaderboard_index.sql` |
+| Applied | `001_initial_schema.sql` to `008_leaderboard_index.sql` |
 | Credentials | Connection string stored in Infisical, never in the repo |
 
 ## Conventions
@@ -109,6 +108,10 @@ Duplicate rules, enforced by triggers:
 - A report that has duplicates, or has a quest, cannot become a duplicate.
 - Only an original report can become a quest.
 
+`GET /files/{id}/report` lets the uploader recover the report attached to their confirmed photo after a lost response.
+It returns null when the photo has no report, and does not allow another user to look up that upload.
+No additional recovery columns are stored.
+
 `area_id` is `h3_lat_lng_to_cell(location, 10)`, a hexagon with an edge of about 75 m.
 It is a stored generated column, so it can never disagree with the location.
 
@@ -150,6 +153,9 @@ stateDiagram-v2
 
 Rules that live in the API, not the database:
 
+- Scheduling the same quest, organizer and exact time slot again returns the existing scheduled or active event.
+  The API locks the quest row while checking and inserting, so concurrent retries create one party and one organizer membership.
+
 - Check-in needs a signed-up member, a scheduled party inside its time slot, an open quest and a location within 100 m of the report.
   The first check-in sets the party `active` and `started_at`.
 - `presence_ping.on_site` is computed with `ST_DWithin` against the quest's report location, within 100 m, and an on-site ping updates `party_member.last_on_site_at`.
@@ -163,25 +169,30 @@ Rules that live in the API, not the database:
 | --- | --- |
 | `trash_category` | Fixed category list, seeded: plastic, paper, glass, metal, organic, textiles, electronics, mixed. |
 | `hazard` | Fixed hazard list with `warning_text` and `requires_dropoff`, seeded: sharps, biohazard, broken_glass, chemicals, bulky_items. |
-| `item` | A piece of gear, such as gloves or grabbers. `007` seeds a litter grabber, work gloves, heavy-duty trash bags, puncture-resistant gloves and closed-toe shoes. |
+| `item` | A piece of gear, such as gloves or grabbers. `005` seeds a sharps container; `007` seeds a litter grabber, work gloves, heavy-duty trash bags, puncture-resistant gloves and closed-toe shoes. |
 | `category_item` | Gear needed for a category. `007` maps the grabber and gloves to every category, and trash bags to every category except electronics. |
-| `hazard_item` | Gear needed for a hazard. `007` maps puncture-resistant gloves and closed-toe shoes to `broken_glass`. |
+| `hazard_item` | Gear needed for a hazard. `required` marks gear volunteers must bring. `005` maps the sharps container to `sharps` as required; `007` maps puncture-resistant gloves and closed-toe shoes to `broken_glass`. |
 
 The gear list for a quest is derived by joining its report's tags to these tables, so Gemini is never called again for gear.
-A report with hazards gets only hazard gear, and gets none if any of its hazards has no gear mapped.
-A report with a hazard that has `requires_dropoff` gets no gear at all, only warnings.
-Hazard warnings never include sharps handling instructions; they point to drop-off and escalation.
+Required hazard gear is always listed, first.
+Beyond that, a report with hazards gets only hazard gear, and gets none if any of its hazards has no gear mapped.
+A report with a hazard that has `requires_dropoff` gets only its required gear, plus warnings.
+Sharps and biohazard warnings recommend calling 311 and warn volunteers to be extremely careful if they handle it themselves; they never give step-by-step handling instructions.
 
 ### Drop-off locations
 
 | Table | Purpose |
 | --- | --- |
-| `dropoff_location` | Sharps and biohazard drop-off sites. `seed` rows are hand-verified and carry name, address and location. `google_places` rows store only `google_place_id`, because Places terms limit caching; the API refetches details. |
+| `dropoff_location` | Sharps and biohazard drop-off sites. `open_data` rows come from an official dataset (NYC Open Data's syringe drop-off sites), keyed by `external_id`, with phone, hours and notes; `verified_at` is the dataset's last update. `seed` rows are hand-verified. Both carry name, address and location. `google_places` rows store only `google_place_id`, because Places terms limit caching; the API refetches details. |
 | `quest_dropoff` | The nearest drop-offs for a quest, fetched once, with `distance_m` and `rank`. `quest.dropoffs_fetched_at` records that the lookup ran, even if it found nothing. |
 
 The API fills `quest_dropoff` the first time a quest with a `requires_dropoff` hazard asks for drop-offs.
-It saves up to 5 rows with `verified_at`, a name, an address and a location within 25 km, nearest first, and only `accepts_sharps` rows for sharps.
-It does not search Google Places yet.
+It saves up to 5 active `accepts_sharps` sites within 5 km, nearest first.
+Listed sites (`open_data` and `seed`) come first, and Google Places is searched only when none is nearby.
+If the Places search fails, nothing is saved, so the next request tries again.
+
+`npm run import:dropoffs` in `server/` loads the NYC dataset and can be run again: rows update in place, and sites that left the dataset get `retired_at` instead of being deleted, because saved quest lists still point at them.
+Retired sites are hidden from lookups and from saved lists.
 
 ### Guilds (not in the MVP)
 
@@ -237,6 +248,8 @@ All aggregates are real-time (`materialized_only = false`) and bucket in UTC.
 - The daily, weekly and monthly leaderboards read the current UTC bucket from the matching aggregate.
   The current week and month are never materialized yet, so their rows are rolled up from `xp_daily_by_user` when read.
   The API filters on a range of fixed timestamps rather than `bucket = time_bucket(..., now())`, so TimescaleDB pushes the filter down to the bucket index.
+- `GET /leaderboards` also counts users with more XP than the caller across the full period to return their personal rank independently of the list limit.
+  It uses the same aggregate and UTC bounds as the list, and returns a null rank when the caller's net period XP is zero or negative.
 - A user's level is derived from `total_xp` in the API and is not stored (see [Levels](mvp.md#levels)).
 - `area_hotspot_30d` returns `distinct_reporters`, `reports` and `last_reported_day` per `area_id` for the last 30 days.
 - The heat map and the hotspot bonus use `distinct_reporters`, so one person re-reporting a spot cannot heat it up alone.
@@ -255,7 +268,7 @@ CALL refresh_continuous_aggregate('report_daily_by_area_reporter', NULL, NULL);
 
 ## Open items
 
-- Seed a few months of backdated demo data for one region, plus hand-verified drop-offs.
+- Seed a few months of backdated demo data for New York City.
 - Add a dashboard aggregate; every party event already carries `area_id`.
 - Drop `report.estimated_bag_count` once no deployed code reads it (kept in 004 so older branches still work on DEV).
 - Clean up R2 objects that were uploaded but never confirmed, and `file` rows that were never attached to anything.

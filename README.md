@@ -15,7 +15,7 @@ It is being built for the 48-hour Hack Knight hackathon.
 5. **Earn XP.** Everyone who checked in gets up to 100 XP, based on how much of the time slot they were on site, with a bonus for hotspots.
    XP feeds daily, weekly, monthly and all-time leaderboards.
 
-Reports flagged for sharps or biohazards show warnings and nearby drop-off locations instead of handling instructions.
+Reports flagged for sharps or biohazards recommend calling 311, require a sharps container for sharps, and show nearby drop-off sites from NYC's official list.
 
 The full product summary is in [docs/mvp.md](docs/mvp.md).
 
@@ -23,8 +23,8 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 
 | Part | State |
 | --- | --- |
-| Database | Migrations 001 to 007 applied to the DEV Tiger Data service (005 is on the `biohazard-dropoffs` branch) |
-| App | Expo starter project in `app/` |
+| Database | Migrations 001 to 008 applied to the DEV Tiger Data service, with NYC sharps drop-off sites imported |
+| App | Expo app with sign-in, nearby events, quest creation, leaderboards, a quest's drop-off sites with directions, and a safety resources page in `app/` |
 | API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports, quests, events and parties, XP, leaderboards, hotspots, equipment and drop-offs |
 
 ## Tech stack
@@ -102,16 +102,19 @@ The app has `expo-dev-client`, so press `s` in the Expo output (or start with `n
 ./scripts/phone.sh
 ```
 
-This starts the API, puts it and Expo behind tunnels and points the app at the API tunnel, so it works on any network, including a phone hotspot.
-Scan the QR code with your phone's camera to open the app in Expo Go, and press Ctrl+C to stop everything.
-Expo Go on iOS needs you logged in to the same Expo account in the app and in the terminal (`npx expo login`).
-It needs the Infisical CLI and [ngrok](https://ngrok.com) with an authtoken; the first run may ask to install `@expo/ngrok`.
+This starts the API and Metro, puts each behind a Cloudflare quick tunnel and points the app at the API tunnel, so it works on any network, including a phone hotspot.
+It prints an `exps://` link and a QR code; scan the code with your phone's camera to open the app in Expo Go, and press Ctrl+C to stop everything.
+To open a screen directly, add `/--/<path>` to the link, for example `exps://<tunnel>/--/resources`.
+Expo's keyboard shortcuts are off in this mode, so shake the phone for the developer menu.
+It needs the Infisical CLI and `cloudflared` (`brew install cloudflared`), but no Cloudflare account.
+It does not use `expo start --tunnel`, whose bundled ngrok often fails to connect.
+Logs go to `$TMPDIR/cleanpursuit-phone/`.
 While it runs, anyone with the API tunnel URL can reach the API and the DEV database behind it.
 
 ### Apply database migrations
 
 Migrations run in order against the Tiger Data service, one file at a time.
-Only run files that have not been applied yet; 001 to 007 are already on the DEV service.
+Only run files that have not been applied yet; 001 to 008 are already on the DEV service.
 The connection string comes from Infisical, so wrap the command in `infisical run`:
 
 ```bash
@@ -189,6 +192,13 @@ Photo URLs in responses expire after an hour, so cache images by file id rather 
 - `POST /reports/{id}/quest` turns an original report into a quest.
 - `GET /quests?latitude=&longitude=` lists open quests nearby, nearest first, for the map and list.
 - `GET /reports/{id}` and `GET /quests/{id}` return one of each.
+- `GET /files/{id}/report` lets the uploader recover the report for a confirmed photo if the submission response was lost.
+  It returns null before that photo has a report; other users get 404.
+
+The app's Create a quest tab uploads and analyzes the photo, lets the reporter edit and confirm the report details and cleanup location, then saves the report and quest.
+It can also schedule an initial party, which makes the creator its organizer and first attendee.
+Duplicate reports link to the original quest and require reviewing that quest before scheduling there.
+AI failure leaves manual reporting available, and partial failures keep saved records for retries.
 
 The full request and response shapes are in the interactive docs at `/docs`.
 
@@ -206,6 +216,31 @@ infisical run -- npm run try:analysis -- --model gemini-3.5-flash-lite --model g
 Pass `--model` more than once to compare models on the same photos.
 Photos must be JPEG, PNG or WebP of at most 10 MB, and each model can analyze 30 photos per run.
 
+### Import sharps drop-off sites
+
+This loads NYC's official syringe and sharps drop-off sites from NYC Open Data, skipping mobile vans that have no fixed location.
+Run it again any time to pick up the city's changes.
+
+```bash
+cd server
+infisical run -- npm run import:dropoffs
+```
+
+### Seed a demo sharps quest
+
+This files a sharps report at Bryant Park through the real flow (R2 upload, report, quest, drop-off lookup) and prints the quest's drop-off screen links.
+Any signed-in user can open the quest, so stay signed in as yourself.
+
+```bash
+cd server
+infisical run -- npm run seed:demo-quest
+infisical run -- npm run seed:demo-quest -- --hazard biohazard --latitude 40.6782 --longitude -73.9442
+infisical run -- npm run seed:demo-quest -- --clean
+```
+
+Running it twice at the same spot reuses the first quest.
+`--clean` deletes every demo user, with their reports, quests and photos.
+
 ## Events and parties
 
 A party is one attempt at a quest.
@@ -214,6 +249,7 @@ Two sets of routes create scheduled parties, and both make the same `party` rows
 - `GET /events?latitude=&longitude=` lists upcoming and in-progress events nearby, soonest first.
 - `POST /quests/{id}/events` schedules an event on an open quest.
   Events start in the future and last at most 12 hours.
+  Retrying the same organizer and exact time slot returns their existing scheduled or active event.
 - `POST /events/{id}/join` signs up for an event until it ends, and `DELETE /events/{id}/join` withdraws before check-in.
 - `GET /events/{id}` returns an event with its attendees.
 - `POST /quests/{questId}/parties` also schedules a party on an open quest.
@@ -241,6 +277,10 @@ Ending a party awards XP to members who checked in; see [XP](docs/mvp.md#xp).
   Each entry has `xp` for the period and `totalXp` for all time.
   Users with no XP in the period are left out, and ties share a rank.
   It returns 20 entries by default and at most 100.
+  `me` gives the signed-in user's `rank`, period `xp` and `totalXp`, even outside the returned entries.
+  `me.rank` is null when the user's net XP in the period is zero or negative.
+  The app's Leaderboard tab uses this endpoint with a limit of 100 and lets users select each period.
+  The older `GET /leaderboard` endpoint still returns all-time ranks including zero-XP accounts.
 - `GET /hotspots?limit=` lists H3 areas reported in the last 30 days with their center point, distinct reporters and report count, busiest first.
   It returns 100 areas by default and at most 250.
   `isHotspot` is true when 3 or more different people reported the area, which is when cleaning it earns bonus XP.
@@ -249,16 +289,18 @@ Ending a party awards XP to members who checked in; see [XP](docs/mvp.md#xp).
 
 - `GET /quests/{id}/equipment` returns gear for a quest and the warnings for its hazards.
   Gear comes from the report's categories, or from its hazards when it has any.
-  A quest with a hazard that needs drop-off (sharps or biohazard) gets no gear, only warnings.
-  If any reported hazard has no gear mapped, the gear list is empty rather than guessed.
-- `GET /quests/{id}/dropoffs` returns drop-off sites for a quest flagged with sharps or biohazard.
-  The first call saves the 5 nearest verified sites within 25 km (sharps-accepting ones for sharps), and later calls return the saved list.
-  When nothing is found, `escalationRecommended` is true and `guidance` points to sanitation and escalation.
-  Quests without those hazards get `required: false` and an empty list.
+  Items with `required: true` come first; volunteers must bring them, such as the sharps container for sharps.
+  A quest with a hazard that needs drop-off (sharps or biohazard) gets only its required gear, plus the warnings.
+  If any reported hazard has no gear mapped, the optional gear list is empty rather than guessed.
+- `GET /quests/{id}/dropoffs` returns drop-off sites for sharps and biohazard quests, nearest first, plus the 311 escalation path.
+  The first request saves the 5 nearest sharps-accepting sites within 5 km, and later requests return the saved list.
+  NYC's listed sites come first; Google Places is searched only when none is nearby, and those results have `verified: false`, so tell volunteers to call ahead.
+  If Places fails, nothing is saved and the next request tries again.
+  Quests without those hazards get `requiresDropoff: false` and an empty list.
 
 ## Secrets
 
-All secrets live in Infisical: the database connection string, the JWT secret, R2 credentials and the Gemini key.
+All secrets live in Infisical: the database connection string, the JWT secret, R2 credentials, the Gemini key and the Google Maps key.
 Never commit `.env` files; the root `.gitignore` excludes every `.env` file except `.env.example`.
 `server/.env.example` lists the variable names the API reads, and `server/src/env.ts` checks them at startup.
 

@@ -13,7 +13,7 @@ export const hazardSchema = z.object({
   code: z.string(),
   label: z.string(),
   warning: z.string(),
-  requiresDropoff: z.boolean().describe('Show drop-off and escalation info instead of cleanup steps'),
+  requiresDropoff: z.boolean().describe('Show drop-off sites and the escalation path; see GET /quests/{id}/dropoffs'),
 });
 
 export const reportSchema = z.object({

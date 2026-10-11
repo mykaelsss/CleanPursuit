@@ -294,7 +294,8 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ['events'],
         summary: 'Schedule an event on a quest',
-        description: 'The signed-in user becomes the organizer and the first attendee.',
+        description: 'The signed-in user becomes the organizer and the first attendee. ' +
+          'Retrying the same quest, organizer and time slot returns their existing scheduled or active event.',
         security,
         params: z.object({ id: z.uuid() }),
         body: z.object({
@@ -314,22 +315,30 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const start = new Date(request.body.scheduledStart);
       const end = new Date(request.body.scheduledEnd);
-      if (start.getTime() <= Date.now()) {
-        throw new HttpError(400, 'START_IN_PAST', 'The party must start in the future');
-      }
       if (end <= start) throw new HttpError(400, 'END_BEFORE_START', 'The party must end after it starts');
       if (end.getTime() - start.getTime() > MAX_EVENT_HOURS * 3_600_000) {
         throw new HttpError(400, 'EVENT_TOO_LONG', `Parties can last at most ${MAX_EVENT_HOURS} hours`);
       }
 
-      const { rows } = await app.db.query<{ status: string }>(`SELECT status FROM quest WHERE id = $1`, [
-        request.params.id,
-      ]);
-      if (!rows[0]) throw new HttpError(404, 'QUEST_NOT_FOUND', 'Quest not found');
-      if (rows[0].status !== 'open') throw new HttpError(409, 'QUEST_NOT_OPEN', 'This quest is no longer open');
-
       // The leader must be a member; the foreign key is deferred, so both rows go in one transaction.
       const eventId = await withTransaction(app.db, async (client) => {
+        // Serialize scheduling on this quest so concurrent retries cannot create a second event.
+        const { rows } = await client.query<{ status: string }>(
+          `SELECT status FROM quest WHERE id = $1 FOR UPDATE`, [request.params.id],
+        );
+        if (!rows[0]) throw new HttpError(404, 'QUEST_NOT_FOUND', 'Quest not found');
+        if (rows[0].status !== 'open') throw new HttpError(409, 'QUEST_NOT_OPEN', 'This quest is no longer open');
+        const existing = await client.query<{ id: string }>(
+          `SELECT id FROM party
+           WHERE quest_id = $1 AND leader_user_id = $2 AND scheduled_start = $3 AND scheduled_end = $4
+             AND status IN ('scheduled', 'active')
+           ORDER BY id LIMIT 1`,
+          [request.params.id, request.user.id, start, end],
+        );
+        if (existing.rows[0]) return existing.rows[0].id;
+        if (start.getTime() <= Date.now()) {
+          throw new HttpError(400, 'START_IN_PAST', 'The party must start in the future');
+        }
         const inserted = await client.query<{ id: string }>(
           `INSERT INTO party (quest_id, leader_user_id, status, scheduled_start, scheduled_end)
            VALUES ($1, $2, 'scheduled', $3, $4)

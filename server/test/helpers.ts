@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import type { Env } from '../src/env.ts';
 import type { AnalyzeInput, Analysis, PhotoAnalyzer } from '../src/lib/analyzer.ts';
+import type { Place, PlaceFinder, SearchInput } from '../src/lib/places.ts';
 import type { Storage } from '../src/lib/storage.ts';
 
 export const testEnv: Env = {
@@ -16,6 +17,7 @@ export const testEnv: Env = {
   R2_BUCKET: 'test',
   GEMINI_API_KEY: 'test',
   GEMINI_MODEL: 'test-model',
+  GOOGLE_MAPS_API_KEY: 'test',
 };
 
 export function fakePool(query: () => Promise<unknown> = async () => ({ rows: [] })): pg.Pool {
@@ -75,6 +77,31 @@ export function fakeAnalyzer(analysis: Partial<Analysis> = {}, error?: Error): F
         inputTokens: 1500,
         outputTokens: 200,
       };
+    },
+  };
+}
+
+export interface FakePlaces extends PlaceFinder {
+  searches: SearchInput[];
+  detailLookups: string[];
+}
+
+// Answers searches with `places` (or throws `error`), so tests never call Google Places.
+export function fakePlaces(places: Place[] = [], error?: Error): FakePlaces {
+  const searches: SearchInput[] = [];
+  const detailLookups: string[] = [];
+  return {
+    searches,
+    detailLookups,
+    async search(input) {
+      searches.push(input);
+      if (error) throw error;
+      return places;
+    },
+    async details(placeId) {
+      detailLookups.push(placeId);
+      if (error) throw error;
+      return places.find((place) => place.id === placeId) ?? null;
     },
   };
 }

@@ -36,7 +36,9 @@ export function isValidTime(time: TimeValue) {
     hour >= 1 &&
     hour <= 12 &&
     minute >= 0 &&
-    minute <= 59
+    minute <= 59 &&
+    Number.isInteger(hour) &&
+    Number.isInteger(minute)
   );
 }
 
@@ -44,8 +46,18 @@ export function isEndLater(start: TimeValue, end: TimeValue) {
   return isValidTime(start) && isValidTime(end) && timeInMinutes(end) > timeInMinutes(start);
 }
 
-export function isValidSchedule(schedule: ScheduleValue) {
-  return isEndLater(schedule.start, schedule.end);
+export function scheduleDates(schedule: ScheduleValue) {
+  const start = new Date(schedule.date);
+  const end = new Date(schedule.date);
+  start.setHours(0, timeInMinutes(schedule.start), 0, 0);
+  end.setHours(0, timeInMinutes(schedule.end), 0, 0);
+  return { start, end };
+}
+
+export function isValidSchedule(schedule: ScheduleValue, now = Date.now()) {
+  const { start, end } = scheduleDates(schedule);
+  return isEndLater(schedule.start, schedule.end) && start.getTime() > now &&
+    end.getTime() - start.getTime() <= 12 * 60 * 60 * 1000;
 }
 
 function timeInMinutes(time: TimeValue) {

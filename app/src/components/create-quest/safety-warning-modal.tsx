@@ -1,12 +1,12 @@
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
 
-import type { SafetyFlag } from '@/components/create-quest/constants';
+import type { Hazard } from '@/lib/api';
 import QuestIcon from '@/components/create-quest/quest-icon';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 
 type SafetyWarningModalProps = {
-  flag: SafetyFlag | undefined;
+  flag: Hazard | undefined;
   onCancel: () => void;
   onConfirm: () => void;
 };

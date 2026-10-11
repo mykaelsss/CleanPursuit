@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { after, describe, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
-import { fakeAnalyzer, fakeStorage, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakePlaces, fakeStorage, testEnv as env } from './helpers.ts';
 
 const skip = process.env.DATABASE_URL
   ? false
@@ -21,6 +21,7 @@ async function startApp(t: {
     pool: createPool(env.DATABASE_URL),
     storage: fakeStorage(),
     analyzer: fakeAnalyzer(),
+    places: fakePlaces(),
   });
 
   t.after(() => app.close());
@@ -109,6 +110,7 @@ describe('leaderboards', { skip }, () => {
     assert.equal(result.period, 'all');
     assert.equal(result.periodStart, null);
     assert.equal(result.limit, 20);
+    assert.deepEqual(result.me, { rank: 1, xp: 2_000_000_000, totalXp: 2_000_000_000 });
     assert.ok(result.entries.length >= 3);
     assert.deepEqual(result.entries.slice(0, 3), [
       { rank: 1, userId: first.id, username: first.username, xp: 2_000_000_000, totalXp: 2_000_000_000 },
@@ -123,12 +125,31 @@ describe('leaderboards', { skip }, () => {
     const limited = await app.inject({
       method: 'GET',
       url: '/leaderboards?limit=2',
-      headers: { authorization: first.authorization },
+      headers: { authorization: third.authorization },
     });
 
     assert.equal(limited.statusCode, 200);
     assert.equal(limited.json().limit, 2);
     assert.equal(limited.json().entries.length, 2);
+    assert.deepEqual(limited.json().me, { rank: 3, xp: 1_999_999_999, totalXp: 1_999_999_999 });
+
+    const unranked = await signUp(app, 'zero');
+    const zero = await app.inject({
+      method: 'GET',
+      url: '/leaderboards',
+      headers: { authorization: unranked.authorization },
+    });
+    assert.equal(zero.statusCode, 200);
+    assert.deepEqual(zero.json().me, { rank: null, xp: 0, totalXp: 0 });
+
+    await app.db.query('DELETE FROM app_user WHERE id = $1', [unranked.id]);
+    const deleted = await app.inject({
+      method: 'GET',
+      url: '/leaderboards',
+      headers: { authorization: unranked.authorization },
+    });
+    assert.equal(deleted.statusCode, 401);
+    assert.equal(deleted.json().code, 'INVALID_ACCESS_TOKEN');
 
     const invalidLimit = await app.inject({
       method: 'GET',
@@ -145,6 +166,7 @@ describe('leaderboards', { skip }, () => {
     const second = await signUp(app, 'e');
     const third = await signUp(app, 'f');
     const negative = await signUp(app, 'g');
+    const inactive = await signUp(app, 'inactive');
 
     // Large values keep these users above anyone else on the shared DEV database.
     // The aggregates are real-time, so rows written now show up without a refresh.
@@ -161,6 +183,7 @@ describe('leaderboards', { skip }, () => {
       `UPDATE app_user SET total_xp = 7 WHERE id = $1`,
       [first.id],
     );
+    await app.db.query('UPDATE app_user SET total_xp = 42 WHERE id = $1', [inactive.id]);
 
     const now = new Date();
     const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
@@ -182,6 +205,7 @@ describe('leaderboards', { skip }, () => {
 
       assert.equal(result.period, period);
       assert.equal(result.periodStart, expectedStarts[period].toISOString(), period);
+      assert.deepEqual(result.me, { rank: 1, xp: 2_000_000_000, totalXp: 7 }, period);
       assert.deepEqual(
         result.entries.slice(0, 3),
         [
@@ -195,6 +219,34 @@ describe('leaderboards', { skip }, () => {
         !result.entries.some((entry: { userId: string }) => entry.userId === negative.id),
         `${period}: XP that nets to zero or less is left off the board`,
       );
+
+      const limited = await app.inject({
+        method: 'GET',
+        url: `/leaderboards?period=${period}&limit=1`,
+        headers: { authorization: second.authorization },
+      });
+      assert.equal(limited.statusCode, 200);
+      assert.equal(limited.json().entries.length, 1);
+      assert.equal(limited.json().entries[0].userId, first.id);
+      assert.deepEqual(limited.json().me, { rank: 1, xp: 2_000_000_000, totalXp: 0 }, period);
+
+      const outside = await app.inject({
+        method: 'GET',
+        url: `/leaderboards?period=${period}&limit=1`,
+        headers: { authorization: third.authorization },
+      });
+      assert.equal(outside.statusCode, 200);
+      assert.deepEqual(outside.json().me, { rank: 3, xp: 1_999_999_999, totalXp: 0 }, period);
+
+      for (const [user, xp, totalXp] of [[negative, -5, 0], [inactive, 0, 42]] as const) {
+        const unranked = await app.inject({
+          method: 'GET',
+          url: `/leaderboards?period=${period}`,
+          headers: { authorization: user.authorization },
+        });
+        assert.equal(unranked.statusCode, 200);
+        assert.deepEqual(unranked.json().me, { rank: null, xp, totalXp }, period);
+      }
     }
 
     const invalidPeriod = await app.inject({
@@ -203,5 +255,39 @@ describe('leaderboards', { skip }, () => {
       headers: { authorization: first.authorization },
     });
     assert.equal(invalidPeriod.statusCode, 400);
+  });
+
+  test('personal period XP excludes previous buckets and treats net-zero XP as unranked', async (t) => {
+    const app = await startApp(t);
+
+    for (const [period, bucket] of [['day', '1 day'], ['week', '1 week'], ['month', '1 month']] as const) {
+      const user = await signUp(app, `boundary_${period}`);
+      await app.db.query(
+        `INSERT INTO activity_event (kind, user_id, xp, occurred_at)
+         VALUES ('xp_adjustment', $1, 100, time_bucket($2::interval, now()) - interval '1 millisecond'),
+                ('xp_adjustment', $1, 5, now()),
+                ('xp_adjustment', $1, -5, now())`,
+        [user.id, bucket],
+      );
+      await app.db.query('UPDATE app_user SET total_xp = 100 WHERE id = $1', [user.id]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/leaderboards?period=${period}&limit=100`,
+        headers: { authorization: user.authorization },
+      });
+      assert.equal(response.statusCode, 200, period);
+      assert.deepEqual(response.json().me, { rank: null, xp: 0, totalXp: 100 }, period);
+      assert.ok(!response.json().entries.some((entry: { userId: string }) => entry.userId === user.id), period);
+
+      const allTime = await app.inject({
+        method: 'GET',
+        url: '/leaderboards?period=all',
+        headers: { authorization: user.authorization },
+      });
+      assert.equal(allTime.statusCode, 200);
+      assert.equal(allTime.json().me.xp, 100);
+      assert.ok(allTime.json().me.rank > 0);
+    }
   });
 });

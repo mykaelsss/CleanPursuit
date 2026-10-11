@@ -19,7 +19,7 @@ Cleanups are volunteer events, which removes the fraud and verification problem 
 | Best Environmental Hack | Gamified neighborhood litter cleanup | Core loop |
 | Best Use of Gemini API | Photo analysis for categories, hazards and difficulty tier | Should have |
 | Best Use of Tiger Data | Hypertables, continuous aggregates for hotspots and leaderboards, PostGIS, H3 | Should have |
-| Best Health Hack | Hazard warnings, equipment guidance and drop-off routing for sharps | Should have |
+| Best Health Hack | Hazard warnings, a 311 disclaimer, required sharps gear and drop-off routing from NYC's official site list | Should have |
 | Best Overall Hack | Full loop working with a populated demo | All of the above |
 | Best Domain Name (GoDaddy Registry) | Register a project domain | Stretch |
 | Best Use of ElevenLabs | Spoken safety briefing | Stretch |
@@ -51,12 +51,15 @@ The demo works end to end with these six features.
 - **Hotspot multiplier.**
   Areas reported by several different people get bonus XP, computed from Tiger Data aggregates.
 - **Biohazard drop-off map.**
-  When a report is flagged as sharps or biohazard, the app fetches nearby drop-off locations once and stores them with the quest.
+  When a quest has sharps or biohazard, the first request for its drop-offs finds the nearest sites and saves them with the quest, so the lookup runs once.
+  Sites come from NYC's official list of syringe and sharps drop-off sites first, and from a Google Places search only when none is within 5 km.
+  Places results are marked unverified, so volunteers call ahead.
   They show on their own map, and tapping one opens directions in the user's maps app.
-  If nothing is nearby, the app shows the sanitation escalation path instead.
-  Volunteers are pointed to drop-off and escalation, never given sharps handling instructions.
+  Every sharps and biohazard quest shows a disclaimer: the recommended approach is to call 311, and anyone who handles it themselves must be extremely careful.
+  A sharps container is required gear for sharps, because drop-off sites only accept sharps in a rigid, puncture-proof container.
+  The app never gives step-by-step handling instructions.
 - **Resources page.**
-  Hardcoded in the app: sanitation escalation, disposal guidance, reporting numbers and where to get supplies.
+  Hardcoded in the app in `app/src/constants/resources.ts`: 311, sharps drop-off, needle-stick first aid, special waste, dumped items and DSNY's volunteer cleanup supplies.
 
 ### Stretch
 
@@ -137,9 +140,26 @@ A single number looked more exact than it is: two Gemini models said 15 and 25 b
 - Any signed-in user can create the quest, not only the reporter.
 - The person who creates the quest is raising awareness, not organizing.
   They are asked if they want to join a party, but they do not have to.
-- The mobile creation flow can collect the report photo, quest title, confirmed trash categories and an initial scheduled-party plan in one guided form.
+- The Create a quest tab collects a before photo, quest title, description, confirmed categories and hazards, an optional trash-volume range, and a location with an editable place name.
+  Photos are resized and converted to JPEG before uploading directly to R2.
+  Gemini suggestions prefill untouched fields; manual edits are preserved if analysis finishes later.
+  The reporter can continue without AI suggestions and must confirm both the report details and the cleanup coordinates before submitting.
+  On phones, GPS and address lookup help pin the spot; web supports GPS or manually entered coordinates.
+  Sharps and biohazard suggestions require the same Yes/No warning confirmation as manually selected hazards.
+  Scheduling an initial party is optional.
+  When enabled, it makes the creator the organizer and first attendee, with a future start and a duration of at most 12 hours.
   The API still saves those records in report -> quest -> party order.
-- A recommended party size is planning guidance for the scheduled party, not a limit on sign-ups.
+- Duplicate reports are saved and linked to the original quest instead of creating a second quest.
+  If the original report has no quest, the flow can create one from it.
+  Scheduling on a duplicate requires reviewing the original quest and its location first.
+  New hazard flags from the duplicate sighting remain visible alongside the original quest's warnings.
+  Gear recommendations for the original are hidden when the new sighting adds a hazard.
+- Failed requests keep the form and resume from saved records while the tab remains mounted.
+  An uploader-only photo-to-report lookup recovers a report whose response was lost; reading the report recovers its quest.
+  Repeating the same event time slot as its organizer returns the existing scheduled or active party.
+- The saved quest summary shows the API-assigned difficulty, bag estimates, gear, hazard warnings and nearby drop-offs with directions, or sanitation escalation guidance.
+- Recommended party size is not collected yet because the API does not store it.
+  Parties have no sign-up limit.
 
 ### Party
 
@@ -241,9 +261,13 @@ A member who earns the full 100 base XP gets no hotspot bonus, because the bonus
 The event card's "up to" figure comes from `server/src/lib/xp.ts` (100 XP per hour on site, times easy 1x, medium 1.5x, hard 2x or legendary 3x, capped at 3 hours).
 That is not what ending a party awards, so the card can show more XP than members receive.
 
-The Leaderboard tab shows all-time XP, shared ranks for equal XP, and the signed-in user's rank even when they are outside the top 100.
-It uses `GET /leaderboard`, which includes accounts with zero XP.
-`GET /leaderboards` serves the daily, weekly, monthly and all-time boards for users with positive XP in the requested period.
+The Leaderboard tab uses `GET /leaderboards` to show daily, weekly, monthly and all-time XP, with all time selected initially.
+Days, weeks and months use the current UTC period, and weeks start on Monday.
+The board shows the top 100 users with positive XP in that period, and equal XP shares a rank.
+The signed-in user's rank and period XP appear even when they are outside the top 100; zero or negative period XP means they are unranked.
+Daily, weekly and monthly views also show the user's all-time XP separately.
+Opening the tab or pulling to refresh loads current results, and a failed refresh keeps the last loaded results with a retry message.
+The older `GET /leaderboard` endpoint remains available for all-time rankings that include zero-XP accounts.
 
 ### Levels
 
@@ -309,8 +333,19 @@ Why Flash-Lite:
 
 ## Directions handoff
 
-- Google Maps: `https://www.google.com/maps/dir/?api=1&destination=LAT,LNG`
+Tapping Directions opens the user's preferred maps app, from `app/src/lib/directions.ts`.
+
+- Android sends a `geo:` link, which opens the default maps app or asks which one to use.
+- iOS cannot tell which maps app the user prefers, so it shows a menu: Apple Maps, Google Maps, and Waze when it is installed.
+  Google's link opens its app when installed and the website otherwise.
+  Detecting Waze needs `LSApplicationQueriesSchemes` in `app.json`, so it only shows up in a development build, not Expo Go.
+- Web opens Google Maps in a new tab.
+
+Links:
+
+- Google Maps: `https://www.google.com/maps/dir/?api=1&destination=LAT,LNG`, plus `&destination_place_id=ID` for Places results
 - Apple Maps: `https://maps.apple.com/?daddr=LAT,LNG`
+- Waze: `https://waze.com/ul?ll=LAT,LNG&navigate=yes`
 
 ## Tech stack
 
@@ -323,7 +358,7 @@ Why Flash-Lite:
 | File storage | Cloudflare R2 |
 | Secrets | Infisical |
 | AI | Gemini (Flash-class) |
-| Drop-off search | Verified sites in `dropoff_location` within 25 km; no Google Places fallback yet |
+| Drop-off search | NYC Open Data's syringe drop-off sites first, Google Places (New) as fallback |
 
 ## 48-hour build order
 
@@ -335,8 +370,8 @@ The core loop ships first so there is always a working demo.
 4. Ending a party with bag count and after photo, then XP and the leaderboard. (Scheduled parties and leaderboards done in the API)
 5. Gemini photo analysis, the tier rules and the equipment lookup. (Done in the API)
 6. Hotspot aggregate and bonus XP. (Done in the API)
-7. Biohazard drop-off map with directions links, and the resources page. (Drop-off lookup done in the API)
-8. Seed a few months of backdated data for one demo region, plus a few hand-verified sharps drop-off locations.
+7. Biohazard drop-off map with directions links, and the resources page. (Drop-off list, directions and resources page done; the map needs a development build)
+8. Seed a few months of backdated data for New York City. (Sharps drop-off sites imported from NYC Open Data)
 9. Polish, rehearse the demo, then stretch goals if time remains.
 
 ## Risks and mitigations
@@ -345,7 +380,7 @@ The core loop ships first so there is always a working demo.
 | --- | --- |
 | XP can be farmed with staged or exaggerated photos | Award XP only after the after photo, only to GPS-checked-in members, cap XP at 100 per member per party, treat the reporter's tier as provisional |
 | Gemini misclassifies a photo | Gemini extracts features only; our rules set the tier; the party leader corrects tags before XP |
-| Drop-off search returns places that do not accept sharps | Only verified sites that accept sharps for sharps quests, and a verify-before-you-go note on each result |
+| Drop-off search returns places that do not accept sharps | NYC's official site list first, Places only as fallback, and a verify-before-you-go note on each Places result |
 | Google Places terms limit caching | Store only place IDs and refetch details |
 | Continuous aggregates lag during the demo | Real-time aggregates with a 5-minute refresh, plus a manual refresh after seeding |
 | Gemini quota or rate limits | Check limits for the team key before the event; one call per report |
@@ -354,8 +389,10 @@ The core loop ships first so there is always a working demo.
 
 Done:
 
-- Schema migrations `001` to `007` are applied to the DEV Tiger service and tested (`005` is on the `biohazard-dropoffs` branch).
+- Schema migrations `001` to `008` are applied to the DEV Tiger service and tested.
 - API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, quests, events and scheduled parties with GPS check-in and presence, ending a party with XP from presence pings and the hotspot bonus, daily, weekly, monthly and all-time leaderboards, hotspots, equipment and drop-offs.
+- 196 sharps drop-off sites imported from NYC Open Data.
+- Region: New York City (the five boroughs) for seed data, drop-off locations, escalation contacts and the resources page.
 
 Open:
 
@@ -366,7 +403,7 @@ Open:
 - [ ] One set of routes for scheduling and joining parties (`/events` and `/parties` overlap).
 - [ ] Walk-up parties, leader handoff, the 30-minute presence timeout, and abandoned and cancelled outcomes.
 - [x] Daily, weekly and monthly leaderboards in the API.
-- [ ] Demo region, for seed data and drop-off locations.
+- [x] Demo region, for seed data and drop-off locations: New York City.
 - [x] Gear seed data for the equipment lookup.
 - [ ] Backdated demo data.
 - [ ] Dashboard aggregate.

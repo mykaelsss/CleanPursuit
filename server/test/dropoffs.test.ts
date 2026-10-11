@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { after, test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createPool } from '../src/lib/db.ts';
-import { fakeAnalyzer, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
+import { fakeAnalyzer, fakePlaces, fakeStorage, PNG_BYTES, testEnv as env } from './helpers.ts';
 
 const skip = process.env.DATABASE_URL ? false : 'needs DATABASE_URL';
 const users: string[] = [];
@@ -29,7 +29,8 @@ after(async () => {
 
 test('drop-offs are ranked, cached, and gated by hazard requirements', { skip }, async (t) => {
   const storage = fakeStorage();
-  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer() });
+  const places = fakePlaces();
+  const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer: fakeAnalyzer(), places });
   t.after(() => app.close());
 
   const suffix = randomBytes(5).toString('hex');
@@ -108,17 +109,18 @@ test('drop-offs are ranked, cached, and gated by hazard requirements', { skip },
   const first = await app.inject({ method: 'GET', url, headers: { authorization } });
   assert.equal(first.statusCode, 200);
   const result = first.json();
-  assert.equal(result.required, true);
-  assert.equal(result.escalationRecommended, false);
-  assert.ok(result.fetchedAt);
-  assert.deepEqual(result.locations.map((item: { name: string }) => item.name), [nearest, farther]);
-  assert.ok(result.locations.every((item: { acceptsSharps: boolean }) => item.acceptsSharps));
+  assert.equal(result.requiresDropoff, true);
+  assert.equal(result.escalation.phone, '311');
+  // The nearest site does not accept sharps, so it is left out.
+  assert.deepEqual(result.dropoffs.map((item: { name: string }) => item.name), [nearest, farther]);
+  assert.ok(result.dropoffs.every((item: { verified: boolean }) => item.verified));
+  // Listed sites were found, so Google Places is not searched.
+  assert.equal(places.searches.length, 0);
 
   await addLocation(`Later ${suffix}`, 0.0001, true);
   const second = await app.inject({ method: 'GET', url, headers: { authorization } });
   assert.equal(second.statusCode, 200);
-  assert.equal(second.json().fetchedAt, result.fetchedAt);
-  assert.deepEqual(second.json().locations.map((item: { name: string }) => item.name), [nearest, farther]);
+  assert.deepEqual(second.json().dropoffs, result.dropoffs, 'the saved list is reused');
 
   // Keep this report more than 25 m away to avoid duplicate-report detection.
   const ordinaryId = await makeQuest(
@@ -129,8 +131,8 @@ test('drop-offs are ranked, cached, and gated by hazard requirements', { skip },
     method: 'GET', url: `/quests/${ordinaryId}/dropoffs`, headers: { authorization },
   });
   assert.equal(ordinary.statusCode, 200);
-  assert.equal(ordinary.json().required, false);
-  assert.deepEqual(ordinary.json().locations, []);
+  assert.equal(ordinary.json().requiresDropoff, false);
+  assert.deepEqual(ordinary.json().dropoffs, []);
 
   const anonymous = await app.inject({ method: 'GET', url });
   assert.equal(anonymous.statusCode, 401);

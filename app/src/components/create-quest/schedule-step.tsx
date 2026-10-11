@@ -19,7 +19,10 @@ export default function ScheduleStep({ value, onChange }: ScheduleStepProps) {
 
   return (
     <AppCard>
-      <StepHeading number={3} title="SCHEDULE THE PARTY" />
+      <StepHeading number={4} title="SCHEDULE THE PARTY" />
+      <ThemedText type="small" themeColor="textSecondary">
+        Pick a future start and a later end on the same date, up to 12 hours apart. Times use the time zone on your device.
+      </ThemedText>
       <View style={styles.fieldGroup}>
         <View style={styles.label}>
           <QuestIcon name="calendar" color={theme.tint} size={20} />

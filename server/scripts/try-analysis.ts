@@ -13,6 +13,7 @@ import { loadEnv } from '../src/env.ts';
 import { createGeminiAnalyzer } from '../src/lib/analyzer.ts';
 import { createPool } from '../src/lib/db.ts';
 import { type ImageType, MAX_IMAGE_BYTES } from '../src/lib/images.ts';
+import { createGooglePlaceFinder } from '../src/lib/places.ts';
 import { createR2Storage } from '../src/lib/storage.ts';
 
 const CONTENT_TYPES: Record<string, ImageType> = {
@@ -79,7 +80,8 @@ try {
     console.log(`\n=== ${model} ===`);
     const analyzer = createGeminiAnalyzer({ apiKey: env.GEMINI_API_KEY, model });
     // A fresh app per model, so each gets its own rate limit budget. Closing it ends its pool.
-    const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer });
+    const places = createGooglePlaceFinder({ apiKey: env.GOOGLE_MAPS_API_KEY });
+    const app = await buildApp({ env, pool: createPool(env.DATABASE_URL), storage, analyzer, places });
 
     const username = `try_${randomBytes(6).toString('hex')}`;
     const registered = await app.inject({

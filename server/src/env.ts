@@ -18,6 +18,8 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().min(1),
   // Pinned to a stable model, not a -latest alias, so behavior only changes on purpose.
   GEMINI_MODEL: z.string().min(1).default('gemini-3.5-flash-lite'),
+  // Google Places API (New), for drop-off sites when no listed site is near a quest. Restrict the key to Places.
+  GOOGLE_MAPS_API_KEY: z.string().min(1),
 });
 
 export type Env = z.infer<typeof envSchema>;

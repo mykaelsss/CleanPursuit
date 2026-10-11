@@ -186,6 +186,32 @@ const reportRoutes: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.get(
+    '/files/:id/report',
+    {
+      onRequest: app.authenticate,
+      schema: {
+        tags: ['reports'],
+        summary: 'Recover your report for an uploaded photo',
+        description: 'Returns null if the confirmed photo has no report yet. Only the uploader can use this lookup.',
+        security,
+        params: z.object({ id: z.uuid() }),
+        response: { 200: reportSchema.nullable(), 400: errorSchema, 401: errorSchema, 404: errorSchema },
+      },
+    },
+    async (request) => {
+      const { rows } = await app.db.query<{ report_id: string | null }>(
+        `SELECT r.id AS report_id
+         FROM file f
+         LEFT JOIN report r ON r.photo_file_id = f.id
+         WHERE f.id = $1 AND f.uploaded_by_user_id = $2`,
+        [request.params.id, request.user.id],
+      );
+      if (!rows[0]) throw new HttpError(404, 'FILE_NOT_FOUND', 'Uploaded photo not found');
+      return rows[0].report_id ? findReport(app.db, app.storage, rows[0].report_id) : null;
+    },
+  );
+
+  app.get(
     '/reports/:id',
     {
       onRequest: app.authenticate,

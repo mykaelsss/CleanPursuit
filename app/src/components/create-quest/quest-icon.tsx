@@ -28,7 +28,7 @@ export default function QuestIcon({ name, color, size = 22 }: QuestIconProps) {
   };
 
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
+    <Svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
       {name === 'camera' ? (
         <>
           <Path {...line} d="M4 7.5h3l1.4-2h7.2l1.4 2h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z" />

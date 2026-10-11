@@ -33,18 +33,73 @@ export interface Tokens {
 export type Session = Tokens & { user: User };
 
 // Users with equal XP share a rank.
+export type LeaderboardPeriod = 'all' | 'day' | 'week' | 'month';
+
 export interface LeaderboardEntry {
   rank: number;
-  user: { id: string; username: string };
+  userId: string;
+  username: string;
+  xp: number;
   totalXp: number;
 }
 
 export interface Leaderboard {
+  period: LeaderboardPeriod;
+  periodStart: string | null;
   entries: LeaderboardEntry[];
-  me: { rank: number; totalXp: number };
+  limit: number;
+  // A user without positive XP in this period is unranked, even if they have all-time XP.
+  me: { rank: number | null; xp: number; totalXp: number };
 }
 
 export type DifficultyTier = 'easy' | 'medium' | 'hard' | 'legendary';
+
+export type LocationPoint = { latitude: number; longitude: number };
+export type Category = { code: string; label: string };
+export type Hazard = Category & { warning: string; requiresDropoff: boolean };
+export type ReportTags = { categories: Category[]; hazards: Hazard[] };
+export type VolumeRange = { minGallons: number; maxGallons: number };
+export type VolumeEstimate = VolumeRange & {
+  bags: { size: 'kitchen' | 'large' | 'contractor'; gallons: number; min: number; max: number }[];
+};
+export interface PhotoAnalysis {
+  fileId: string;
+  showsLitter: boolean;
+  description: string;
+  categories: string[];
+  hazards: string[];
+  estimatedVolume: VolumeEstimate | null;
+}
+export interface ReportInput {
+  photoFileId: string;
+  description: string;
+  location: LocationPoint;
+  placeName?: string;
+  categories: string[];
+  hazards: string[];
+  estimatedVolume?: VolumeRange;
+}
+export interface LitterReport {
+  id: string;
+  description: string;
+  location: LocationPoint;
+  placeName: string | null;
+  difficultyTier: DifficultyTier;
+  estimatedVolume: VolumeEstimate | null;
+  categories: Category[];
+  hazards: Hazard[];
+  photo: { id: string; url: string };
+  questId: string | null;
+  duplicateOf: { reportId: string; questId: string | null } | null;
+}
+export interface Quest {
+  id: string;
+  title: string;
+  status: 'open' | 'completed' | 'cancelled' | 'expired';
+  report: LitterReport;
+}
+
+export type AuthedRequest = <T>(path: string, options?: { method?: string; body?: unknown }) => Promise<T>;
 
 // An event is a scheduled cleanup on a quest. The organizer is the party leader.
 export interface CleanupEvent {
@@ -123,3 +178,45 @@ export const authApi = {
   logout: (refreshToken: string) => request<void>('/auth/logout', { method: 'POST', body: { refreshToken } }),
   me: (accessToken: string) => request<User>('/me', { accessToken }),
 };
+
+export interface EquipmentItem {
+  id: string;
+  name: string;
+  description: string | null;
+  // Volunteers must bring it, such as a sharps container for sharps. Required items come first.
+  required: boolean;
+}
+
+export interface QuestEquipment {
+  questId: string;
+  items: EquipmentItem[];
+  hazards: Hazard[];
+}
+
+export interface Dropoff {
+  id: string;
+  name: string;
+  address: string;
+  location: LocationPoint;
+  distanceM: number;
+  phone: string | null;
+  hours: string | null;
+  // Where to find the drop-off at the site, such as "Lobby".
+  notes: string | null;
+  // False for sites found by a Google search, which may not accept sharps.
+  verified: boolean;
+  googlePlaceId: string | null;
+}
+
+export interface Escalation {
+  name: string;
+  phone: string;
+  url: string;
+  message: string;
+}
+
+export interface QuestDropoffs {
+  requiresDropoff: boolean;
+  dropoffs: Dropoff[];
+  escalation: Escalation;
+}
