@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import AppHeader from '@/components/app-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -80,13 +81,12 @@ export default function SignInScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+      <AppHeader backgroundColor="backgroundElement" brandColor="tint" />
+
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-            <View style={styles.header}>
-              <ThemedText type="subtitle" style={{ color: theme.tint }}>
-                CleanPursuit
-              </ThemedText>
+            <View style={styles.intro}>
               <ThemedText themeColor="textSecondary" style={styles.centered}>
                 Report litter, rally a party to clean it up and earn XP.
               </ThemedText>
@@ -248,10 +248,10 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 420,
     padding: Spacing.four,
-    paddingTop: Spacing.six,
+    paddingTop: Spacing.three,
     gap: Spacing.four,
   },
-  header: {
+  intro: {
     alignItems: 'center',
     gap: Spacing.two,
   },
