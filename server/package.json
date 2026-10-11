@@ -11,7 +11,8 @@
     "start": "node src/server.ts",
     "typecheck": "tsc",
     "test": "node --test 'test/**/*.test.ts'",
-    "try:analysis": "node scripts/try-analysis.ts"
+    "try:analysis": "node scripts/try-analysis.ts",
+    "seed:demo": "node scripts/seed-demo.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1149.0",

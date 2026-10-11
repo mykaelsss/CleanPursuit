@@ -22,7 +22,7 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 
 | Part | State |
 | --- | --- |
-| Database | Migrations 001 to 004 applied to the DEV Tiger Data service |
+| Database | Migrations 001 to 006 applied to the DEV Tiger Data service (005 is on the `biohazard-dropoffs` branch) |
 | App | Expo starter project in `app/` |
 | API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports and quests |
 
@@ -44,6 +44,7 @@ app/                    React Native app (Expo)
 server/src/             Fastify API
 server/test/            API tests
 server/db/migrations/   Numbered SQL migrations, applied in order
+server/db/seed/         Photos for the demo data script
 scripts/phone.sh        Runs the API and app for Expo Go on a phone, over tunnels
 docs/mvp.md             Product summary: scope, core loop, XP rules, risks
 docs/database.md        Database design: tables, relationships, aggregates
@@ -109,7 +110,7 @@ While it runs, anyone with the API tunnel URL can reach the API and the DEV data
 ### Apply database migrations
 
 Migrations run in order against the Tiger Data service, one file at a time.
-Only run files that have not been applied yet; 001 to 004 are already on the DEV service.
+Only run files that have not been applied yet; 001 to 006 are already on the DEV service.
 The connection string comes from Infisical, so wrap the command in `infisical run`:
 
 ```bash
@@ -118,6 +119,23 @@ infisical run -- sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/db/mig
 
 The single quotes matter: `$DATABASE_URL` must expand inside the command Infisical runs, not in your shell.
 Applied migrations are never edited; changes go in a new numbered file.
+
+### Load demo data
+
+```bash
+cd server
+infisical run -- npm run seed:demo
+```
+
+This creates 26 demo users and 11 cleanup events across the five boroughs, each with a report, a photo and a quest.
+One event is under way and the rest start over the next week, at set hours in New York time.
+Sign in as `demo` with the password `cleanpursuit-demo`: that account leads the Prospect Park event and has joined the Meadow Lake and Jamaica Avenue ones.
+Every other demo user has the same password.
+
+Rerun it shortly before a demo.
+Each run deletes what the demo accounts created (including parties other users scheduled on demo quests) and recreates it, so event times stay current.
+Demo accounts are the ones with an `@demo.example.com` email, and they keep their ids, so the app stays signed in across runs.
+The photos are in `server/db/seed/photos/`, credited in its `CREDITS.md`.
 
 ## Auth
 
@@ -162,6 +180,8 @@ Photo URLs in responses expire after an hour, so cache images by file id rather 
   The high end may be at most 1.5 times the low end (or one kitchen bag above it); wider ranges get 400 `INVALID_VOLUME_RANGE`.
   See [Trash amount](docs/mvp.md#trash-amount).
 - `POST /reports` files a report.
+  Send `placeName`, a readable name for the spot such as "Tompkins Square Park, East Village", so the app can show it instead of coordinates.
+  Suggest one from the phone's geocoder and let the reporter edit it.
   The difficulty tier comes from the tags the reporter sends, using the rules in [docs/mvp.md](docs/mvp.md#difficulty-tier).
   Tags that Gemini suggested and the reporter kept are recorded with `gemini` as their source.
   If the spot is already reported, the report is still saved and `duplicateOf` points at the original and its quest.
