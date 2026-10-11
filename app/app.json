@@ -9,7 +9,10 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.anonymous.CleanPursuit"
+      "bundleIdentifier": "com.anonymous.CleanPursuit",
+      "infoPlist": {
+        "LSApplicationQueriesSchemes": ["waze"]
+      }
     },
     "android": {
       "adaptiveIcon": {

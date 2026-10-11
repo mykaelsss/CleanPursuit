@@ -59,7 +59,7 @@ The demo works end to end with these six features.
   A sharps container is required gear for sharps, because drop-off sites only accept sharps in a rigid, puncture-proof container.
   The app never gives step-by-step handling instructions.
 - **Resources page.**
-  Hardcoded in the app: sanitation escalation, disposal guidance, reporting numbers and where to get supplies.
+  Hardcoded in the app in `app/src/constants/resources.ts`: 311, sharps drop-off, needle-stick first aid, special waste, dumped items and DSNY's volunteer cleanup supplies.
 
 ### Stretch
 
@@ -321,8 +321,19 @@ Why Flash-Lite:
 
 ## Directions handoff
 
-- Google Maps: `https://www.google.com/maps/dir/?api=1&destination=LAT,LNG`
+Tapping Directions opens the user's preferred maps app, from `app/src/lib/directions.ts`.
+
+- Android sends a `geo:` link, which opens the default maps app or asks which one to use.
+- iOS cannot tell which maps app the user prefers, so it shows a menu: Apple Maps, Google Maps, and Waze when it is installed.
+  Google's link opens its app when installed and the website otherwise.
+  Detecting Waze needs `LSApplicationQueriesSchemes` in `app.json`, so it only shows up in a development build, not Expo Go.
+- Web opens Google Maps in a new tab.
+
+Links:
+
+- Google Maps: `https://www.google.com/maps/dir/?api=1&destination=LAT,LNG`, plus `&destination_place_id=ID` for Places results
 - Apple Maps: `https://maps.apple.com/?daddr=LAT,LNG`
+- Waze: `https://waze.com/ul?ll=LAT,LNG&navigate=yes`
 
 ## Tech stack
 
@@ -347,7 +358,7 @@ The core loop ships first so there is always a working demo.
 4. Ending a party with bag count and after photo, then XP and the leaderboard. (Scheduled parties and leaderboards done in the API)
 5. Gemini photo analysis, the tier rules and the equipment lookup. (Done in the API)
 6. Hotspot aggregate and bonus XP. (Done in the API)
-7. Biohazard drop-off map with directions links, and the resources page. (Drop-off lookup done in the API)
+7. Biohazard drop-off map with directions links, and the resources page. (Drop-off list, directions and resources page done; the map needs a development build)
 8. Seed a few months of backdated data for New York City. (Sharps drop-off sites imported from NYC Open Data)
 9. Polish, rehearse the demo, then stretch goals if time remains.
 

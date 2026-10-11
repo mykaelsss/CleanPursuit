@@ -41,6 +41,8 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Protected guard={signedIn}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="quests/[id]/dropoffs" options={{ headerShown: true, headerBackTitle: 'Back' }} />
+        <Stack.Screen name="resources" options={{ headerShown: true, headerBackTitle: 'Back' }} />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="sign-in" />

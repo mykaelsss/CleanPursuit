@@ -24,7 +24,7 @@ The full product summary is in [docs/mvp.md](docs/mvp.md).
 | Part | State |
 | --- | --- |
 | Database | Migrations 001 to 008 applied to the DEV Tiger Data service, with NYC sharps drop-off sites imported |
-| App | Expo app with sign-in, nearby events, quest creation and leaderboards in `app/` |
+| App | Expo app with sign-in, nearby events, quest creation, leaderboards, a quest's drop-off sites with directions, and a safety resources page in `app/` |
 | API | Fastify in `server/` with auth, photo uploads, Gemini photo analysis, reports, quests, events and parties, XP, leaderboards, hotspots, equipment and drop-offs |
 
 ## Tech stack
@@ -102,10 +102,13 @@ The app has `expo-dev-client`, so press `s` in the Expo output (or start with `n
 ./scripts/phone.sh
 ```
 
-This starts the API, puts it and Expo behind tunnels and points the app at the API tunnel, so it works on any network, including a phone hotspot.
-Scan the QR code with your phone's camera to open the app in Expo Go, and press Ctrl+C to stop everything.
-Expo Go on iOS needs you logged in to the same Expo account in the app and in the terminal (`npx expo login`).
-It needs the Infisical CLI and [ngrok](https://ngrok.com) with an authtoken; the first run may ask to install `@expo/ngrok`.
+This starts the API and Metro, puts each behind a Cloudflare quick tunnel and points the app at the API tunnel, so it works on any network, including a phone hotspot.
+It prints an `exps://` link and a QR code; scan the code with your phone's camera to open the app in Expo Go, and press Ctrl+C to stop everything.
+To open a screen directly, add `/--/<path>` to the link, for example `exps://<tunnel>/--/resources`.
+Expo's keyboard shortcuts are off in this mode, so shake the phone for the developer menu.
+It needs the Infisical CLI and `cloudflared` (`brew install cloudflared`), but no Cloudflare account.
+It does not use `expo start --tunnel`, whose bundled ngrok often fails to connect.
+Logs go to `$TMPDIR/cleanpursuit-phone/`.
 While it runs, anyone with the API tunnel URL can reach the API and the DEV database behind it.
 
 ### Apply database migrations
@@ -222,6 +225,21 @@ Run it again any time to pick up the city's changes.
 cd server
 infisical run -- npm run import:dropoffs
 ```
+
+### Seed a demo sharps quest
+
+This files a sharps report at Bryant Park through the real flow (R2 upload, report, quest, drop-off lookup) and prints the quest's drop-off screen links.
+Any signed-in user can open the quest, so stay signed in as yourself.
+
+```bash
+cd server
+infisical run -- npm run seed:demo-quest
+infisical run -- npm run seed:demo-quest -- --hazard biohazard --latitude 40.6782 --longitude -73.9442
+infisical run -- npm run seed:demo-quest -- --clean
+```
+
+Running it twice at the same spot reuses the first quest.
+`--clean` deletes every demo user, with their reports, quests and photos.
 
 ## Events and parties
 
