@@ -18,7 +18,7 @@ After installing or updating a native package, rebuild the development app with 
 Restarting Metro or reloading JavaScript does not add native modules to an already installed app.
 For later JavaScript-only changes, use `npm start` with the rebuilt development app.
 
-If startup reports `RNCWebViewModule` could not be found, the installed development app is missing the native part of `react-native-webview` used by the events map.
+If startup reports `RNCWebViewModule` could not be found, the installed development app is missing the native part of `react-native-webview` used by the Quests map.
 Run `npm run ios` from this directory for iOS, or `npm run android` for Android, then reopen the rebuilt app.
 An Expo Router `ErrorBoundary` error following that failure is a consequence of the route import failing.
 
@@ -32,9 +32,12 @@ npm run ios
 
 ## Map
 
-The events map is [Leaflet](https://leafletjs.com) with OpenStreetMap's standard tiles, so it needs no API key.
+The Quests map is [Leaflet](https://leafletjs.com) with OpenStreetMap's standard tiles, so it needs no API key.
 Those tiles are run by volunteers, so follow the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/): fine for development and a demo, but switch to a paid tile provider before a real launch.
 It runs in a WebView on phones and an iframe on web, from one page in `src/lib/leaflet-map-html.ts`.
+
+It shows scheduled parties as XP bubbles, open quests with no party as "!" waypoints, and hotspots from `GET /hotspots` as ember glows that turn into H3 hexagons at street zoom.
+See [Quests map](../docs/mvp.md#quests-map) for the rules.
 
 ## Leaderboard
 

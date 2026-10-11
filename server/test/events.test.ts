@@ -136,6 +136,7 @@ describe('events', { skip }, () => {
     assert.equal(list.statusCode, 200);
     const listed = list.json().events.find((e: { id: string }) => e.id === event.id);
     assert.equal(listed.distanceM, 0);
+    assert.match(listed.areaId, /^[0-9a-f]{15}$/);
     assert.equal(listed.joined, false);
 
     const joined = await app.inject({

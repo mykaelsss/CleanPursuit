@@ -23,6 +23,7 @@ const eventSchema = z.object({
   description: z.string().describe("The report's description of the site"),
   location: locationSchema,
   placeName: placeNameSchema.nullable(),
+  areaId: z.string().describe('H3 area of the report, to match against /hotspots'),
   difficultyTier: difficultyTierSchema,
   status: z.enum(['scheduled', 'active']).describe('active once someone has checked in'),
   scheduledStart: z.iso.datetime(),
@@ -59,7 +60,7 @@ const OPEN_EVENT = `p.scheduled_start IS NOT NULL AND p.status IN ('scheduled', 
 // $1 is the signed-in user's id.
 const EVENT_COLUMNS = `
   p.id, p.quest_id, p.leader_user_id, p.status, p.scheduled_start, p.scheduled_end,
-  q.title, r.description, ${selectLocation('r.location')}, r.place_name, r.difficulty_tier,
+  q.title, r.description, ${selectLocation('r.location')}, r.place_name, r.area_id::text, r.difficulty_tier,
   u.username AS organizer_username, r.photo_file_id, f.key AS photo_key,
   (SELECT count(*)::integer FROM party_member m
    WHERE m.party_id = p.id AND m.status IN ${ATTENDING}) AS attendee_count,
@@ -85,6 +86,7 @@ interface EventRow {
   latitude: number;
   longitude: number;
   place_name: string | null;
+  area_id: string;
   difficulty_tier: DifficultyTier;
   organizer_username: string;
   photo_file_id: string;
@@ -101,6 +103,7 @@ async function toEvent(row: EventRow, userId: string, storage: Storage): Promise
     description: row.description,
     location: { latitude: row.latitude, longitude: row.longitude },
     placeName: row.place_name,
+    areaId: row.area_id,
     difficultyTier: row.difficulty_tier,
     status: row.status,
     scheduledStart: row.scheduled_start.toISOString(),

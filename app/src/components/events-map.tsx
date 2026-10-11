@@ -7,13 +7,25 @@ import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
-import type { NearbyEvent } from '@/lib/api';
-import { LEAFLET_MAP_HTML, MAP_PAGE_URL, type MapCommand, parseMapEvent, useMapUpdate } from '@/lib/leaflet-map-html';
+import type { HotspotArea, NearbyEvent, NearbyQuest } from '@/lib/api';
+import {
+  LEAFLET_MAP_HTML,
+  MAP_PAGE_URL,
+  type MapCommand,
+  type MapSelection,
+  parseMapEvent,
+  type PinKind,
+  useMapUpdate,
+} from '@/lib/leaflet-map-html';
 
 export interface EventsMapProps {
   events: NearbyEvent[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
+  // Open quests with no party yet, shown as waypoints.
+  quests: NearbyQuest[];
+  // Recently reported areas, shown as glows and, up close, hexagons.
+  hotspots: HotspotArea[];
+  selected: MapSelection | null;
+  onSelect: (kind: PinKind, id: string) => void;
   // Where to center the map, such as the user's location. Changing it pans the map there.
   center: { latitude: number; longitude: number } | null;
   // The user's location, shown as a blue dot, or null when unknown or outside NYC.
@@ -23,7 +35,16 @@ export interface EventsMapProps {
 }
 
 // The Leaflet map page (see leaflet-map-html.ts) in a WebView.
-export function EventsMap({ events, selectedId, onSelect, center, userLocation, bottomPadding }: EventsMapProps) {
+export function EventsMap({
+  events,
+  quests,
+  hotspots,
+  selected,
+  onSelect,
+  center,
+  userLocation,
+  bottomPadding,
+}: EventsMapProps) {
   const webView = useRef<WebView>(null);
   const ready = useRef(false);
   const latest = useRef<{ update: MapCommand | null; center: EventsMapProps['center'] }>({ update: null, center: null });
@@ -35,7 +56,9 @@ export function EventsMap({ events, selectedId, onSelect, center, userLocation, 
 
   const update = useMapUpdate({
     events,
-    selectedId,
+    quests,
+    hotspots,
+    selected,
     user: userLocation,
     bottomPadding,
     reduceMotion,
@@ -67,7 +90,7 @@ export function EventsMap({ events, selectedId, onSelect, center, userLocation, 
       if (latest.current.update) send(latest.current.update);
       if (latest.current.center) send({ type: 'center', ...latest.current.center });
     } else if (event?.type === 'select') {
-      onSelect(event.id);
+      onSelect(event.kind, event.id);
     } else if (event?.type === 'error') {
       setLoadError(event.message);
     }
@@ -98,7 +121,7 @@ export function EventsMap({ events, selectedId, onSelect, center, userLocation, 
         overScrollMode="never"
         setBuiltInZoomControls={false}
         setSupportMultipleWindows={false}
-        accessibilityLabel="Map of cleanup events"
+        accessibilityLabel="Map of quests, cleanup parties and hotspots"
       />
       {loadError && (
         <View style={[styles.error, { backgroundColor: theme.backgroundElement }]} accessibilityRole="alert">

@@ -348,6 +348,7 @@ describe('reports and quests', { skip }, () => {
     assert.equal(quests[0].difficultyTier, 'legendary');
     assert.deepEqual(quests[0].hazards, ['sharps']);
     assert.equal(quests[0].placeName, 'By the bench');
+    assert.match(quests[0].areaId, /^[0-9a-f]{15}$/);
     assert.equal(quests[1].placeName, null);
 
     const narrow = await list(500);

@@ -1,11 +1,11 @@
 import { useMemo } from 'react';
 
 import { Tiers } from '@/constants/theme';
-import type { NearbyEvent } from '@/lib/api';
+import type { HotspotArea, NearbyEvent, NearbyQuest } from '@/lib/api';
 import { TIER_LABELS } from '@/lib/event-format';
 import { NYC_BOUNDS, NYC_MIN_ZOOM, NYC_REGION } from '@/lib/nyc';
 
-// The events map is a Leaflet page with OpenStreetMap's standard tiles, so it needs no API key.
+// The quests map is a Leaflet page with OpenStreetMap's standard tiles, so it needs no API key.
 // Phones load it in a WebView and web loads it in an iframe. The app and the page talk by messages:
 // the app sends `MapCommand`s, and the page answers with `MapEvent`s.
 //
@@ -14,7 +14,14 @@ import { NYC_BOUNDS, NYC_MIN_ZOOM, NYC_REGION } from '@/lib/nyc';
 // The iframe on web shares the app's own address, which works the same way.
 export const MAP_PAGE_URL = 'https://cleanpursuit.app/';
 
+// Scheduled parties show as XP bubbles. Open quests with no party yet show as waypoints: a diamond
+// with a "!", like a quest giver in a game.
+export type PinKind = 'event' | 'quest';
+
+export type MapSelection = { kind: PinKind; id: string };
+
 export interface MapPin {
+  kind: PinKind;
   id: string;
   latitude: number;
   longitude: number;
@@ -25,11 +32,23 @@ export interface MapPin {
   selected: boolean;
 }
 
+// A recently reported H3 area. It glows like an ember, brighter as more people report it, and shows its
+// hexagon once the map is zoomed in far enough to see it.
+export interface MapArea {
+  id: string;
+  latitude: number;
+  longitude: number;
+  boundary: [number, number][];
+  reporters: number;
+  hot: boolean;
+}
+
 export type MapCommand =
   | {
       type: 'update';
       pins: MapPin[];
-      selectedId: string | null;
+      areas: MapArea[];
+      selected: MapSelection | null;
       user: { latitude: number; longitude: number } | null;
       // Height of the bottom sheet, so centering and the location button stay in the visible area.
       bottomPadding: number;
@@ -38,7 +57,10 @@ export type MapCommand =
     }
   | { type: 'center'; latitude: number; longitude: number };
 
-export type MapEvent = { type: 'ready' } | { type: 'select'; id: string } | { type: 'error'; message: string };
+export type MapEvent =
+  | { type: 'ready' }
+  | { type: 'select'; kind: PinKind; id: string }
+  | { type: 'error'; message: string };
 
 export function parseMapEvent(data: unknown): MapEvent | null {
   try {
@@ -52,7 +74,9 @@ export function parseMapEvent(data: unknown): MapEvent | null {
 // Builds the `update` command from the screen's state. Shared by the WebView and iframe versions.
 export function useMapUpdate(options: {
   events: NearbyEvent[];
-  selectedId: string | null;
+  quests: NearbyQuest[];
+  hotspots: HotspotArea[];
+  selected: MapSelection | null;
   user: { latitude: number; longitude: number } | null;
   bottomPadding: number;
   reduceMotion: boolean;
@@ -60,33 +84,58 @@ export function useMapUpdate(options: {
   selectedFill: string;
   selectedText: string;
 }): MapCommand {
-  const { events, selectedId, user, bottomPadding, reduceMotion, dark, selectedFill, selectedText } = options;
-  return useMemo(
-    () => ({
+  const { events, quests, hotspots, selected, user, bottomPadding, reduceMotion, dark, selectedFill, selectedText } =
+    options;
+  return useMemo(() => {
+    const hot = new Set(hotspots.filter((area) => area.isHotspot).map((area) => area.areaId));
+    const pin = (
+      kind: PinKind,
+      item: { id: string; title: string; difficultyTier: NearbyEvent['difficultyTier']; areaId: string } & {
+        location: { latitude: number; longitude: number };
+      },
+      label: string,
+      reward: string,
+    ): MapPin => {
+      const isSelected = selected?.kind === kind && selected.id === item.id;
+      const tier = Tiers[item.difficultyTier];
+      const spoken = [item.title, TIER_LABELS[item.difficultyTier], reward, hot.has(item.areaId) ? 'hotspot' : null];
+      return {
+        kind,
+        id: item.id,
+        latitude: item.location.latitude,
+        longitude: item.location.longitude,
+        label,
+        accessibilityLabel: spoken.filter(Boolean).join(', '),
+        fill: isSelected ? selectedFill : tier.fill,
+        text: isSelected ? selectedText : tier.onFill,
+        selected: isSelected,
+      };
+    };
+
+    return {
       type: 'update',
-      pins: events.map((event) => {
-        const selected = event.id === selectedId;
-        const tier = Tiers[event.difficultyTier];
-        const xp = `${event.maxXp.toLocaleString()} XP`;
-        return {
-          id: event.id,
-          latitude: event.location.latitude,
-          longitude: event.location.longitude,
-          label: xp,
-          accessibilityLabel: `${event.title}, ${TIER_LABELS[event.difficultyTier]}, up to ${xp}`,
-          fill: selected ? selectedFill : tier.fill,
-          text: selected ? selectedText : tier.onFill,
-          selected,
-        };
-      }),
-      selectedId,
+      pins: [
+        ...quests.map((quest) => pin('quest', quest, '!', 'no party yet')),
+        ...events.map((event) => {
+          const xp = `${event.maxXp.toLocaleString()} XP`;
+          return pin('event', event, xp, `party, up to ${xp}`);
+        }),
+      ],
+      areas: hotspots.map((area) => ({
+        id: area.areaId,
+        latitude: area.latitude,
+        longitude: area.longitude,
+        boundary: area.boundary.map((corner): [number, number] => [corner.latitude, corner.longitude]),
+        reporters: area.distinctReporters,
+        hot: area.isHotspot,
+      })),
+      selected,
       user,
       bottomPadding: Math.round(bottomPadding),
       reduceMotion,
       dark,
-    }),
-    [events, selectedId, user, bottomPadding, reduceMotion, dark, selectedFill, selectedText],
-  );
+    };
+  }, [events, quests, hotspots, selected, user, bottomPadding, reduceMotion, dark, selectedFill, selectedText]);
 }
 
 const CONFIG = {
@@ -122,6 +171,27 @@ export const LEAFLET_MAP_HTML = `<!doctype html>
     border-radius: 16px; border-width: 3px; }
   .cp-pointer { width: 0; height: 0; margin-top: -1px; border-left: 7px solid transparent;
     border-right: 7px solid transparent; border-top: 9px solid; }
+  /* Waypoints: open quests with no party yet. The diamond sits on the spot; 44px keeps it easy to tap. */
+  .cp-waypoint { position: absolute; width: 44px; height: 44px; transform: translate(-50%, -50%);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .cp-diamond { position: absolute; width: 22px; height: 22px; transform: rotate(45deg);
+    border-radius: 5px; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); }
+  .cp-mark { position: relative; font-family: 'Lilita One', system-ui, sans-serif; font-size: 15px; line-height: 1; }
+  .cp-waypoint.selected .cp-diamond { width: 30px; height: 30px; border-width: 3px; border-radius: 7px; }
+  .cp-waypoint.selected .cp-mark { font-size: 20px; }
+  /* Reported areas glow like embers. Hotspots, reported by enough people to earn bonus XP, burn
+     hotter and slowly breathe. Up close the glow steps back for the area's real hexagon. */
+  .cp-heat { position: absolute; transform: translate(-50%, -50%); transition: opacity 0.3s; }
+  .cp-heat-core { width: 100%; height: 100%; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255, 150, 50, 0.6) 0%, rgba(255, 140, 50, 0.25) 40%, rgba(255, 140, 50, 0) 70%); }
+  .cp-heat.hot .cp-heat-core { animation: cp-breathe 3.6s ease-in-out infinite;
+    background: radial-gradient(circle, rgba(255, 80, 20, 0.85) 0%, rgba(255, 100, 30, 0.42) 38%, rgba(255, 120, 40, 0) 70%); }
+  /* On dark tiles the glows add light, so they read as embers instead of muddy orange. */
+  body.dark .leaflet-cpHeat-pane { mix-blend-mode: screen; }
+  body.cp-still .cp-heat-core { animation: none; }
+  body.cp-near .cp-heat { opacity: 0.35; }
+  body:not(.cp-near) .cp-hex { display: none; }
+  @keyframes cp-breathe { 0%, 100% { transform: scale(0.9); opacity: 0.8; } 50% { transform: scale(1.05); opacity: 1; } }
   .cp-locate { width: 44px; height: 44px; border: none; border-radius: 22px; background: #fff;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); font-size: 22px; line-height: 44px; color: #1A73E8;
     cursor: pointer; padding: 0; }
@@ -158,9 +228,23 @@ export const LEAFLET_MAP_HTML = `<!doctype html>
   // The bottom sheet covers the bottom of the map, so credits go at the top.
   map.attributionControl.setPosition('topright');
 
-  var state = { dark: null, selectedId: null, bottomPadding: 0, reduceMotion: false, user: null };
+  // Glows sit above the tiles and below the hexagons and pins, and never take taps.
+  var heatPane = map.createPane('cpHeat');
+  heatPane.style.zIndex = 350;
+  heatPane.style.pointerEvents = 'none';
+
+  // Hexagons are about 150 m across, so they only show from this zoom, where they are big enough to read.
+  var NEAR_ZOOM = 14;
+  function syncZoom() {
+    document.body.classList.toggle('cp-near', map.getZoom() >= NEAR_ZOOM);
+  }
+  map.on('zoomend', syncZoom);
+  syncZoom();
+
+  var state = { dark: null, selectedKey: null, bottomPadding: 0, reduceMotion: false, user: null };
   var tiles = null;
   var markers = {};
+  var areas = {};
   var userDot = null;
 
   function setTiles(dark) {
@@ -182,6 +266,11 @@ export const LEAFLET_MAP_HTML = `<!doctype html>
   }
 
   function pinHtml(pin) {
+    if (pin.kind === 'quest') {
+      return '<div class="cp-waypoint' + (pin.selected ? ' selected' : '') + '">' +
+        '<div class="cp-diamond" style="background:' + escapeHtml(pin.fill) + '"></div>' +
+        '<div class="cp-mark" style="color:' + escapeHtml(pin.text) + '">' + escapeHtml(pin.label) + '</div></div>';
+    }
     return '<div class="cp-pin' + (pin.selected ? ' selected' : '') + '">' +
       '<div class="cp-bubble" style="background:' + escapeHtml(pin.fill) + ';color:' + escapeHtml(pin.text) + '">' +
       escapeHtml(pin.label) + '</div>' +
@@ -211,24 +300,76 @@ export const LEAFLET_MAP_HTML = `<!doctype html>
   });
   var locate = new Locate().addTo(map);
 
+  // Bigger glows for areas more people reported, up to six.
+  function heatSize(reporters) {
+    return 56 + 14 * (Math.min(Math.max(reporters, 1), 6) - 1);
+  }
+
+  function updateAreas(list) {
+    var seen = {};
+    list.forEach(function (area) {
+      seen[area.id] = true;
+      var key = JSON.stringify(area);
+      var existing = areas[area.id];
+      if (existing && existing.key === key) return;
+      if (existing) {
+        map.removeLayer(existing.glow);
+        map.removeLayer(existing.hex);
+      }
+      var size = heatSize(area.reporters);
+      var glow = L.marker([area.latitude, area.longitude], {
+        pane: 'cpHeat',
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({
+          className: 'cp-icon',
+          iconSize: null,
+          html: '<div class="cp-heat' + (area.hot ? ' hot' : '') + '" aria-hidden="true" style="width:' + size +
+            'px;height:' + size + 'px"><div class="cp-heat-core"></div></div>',
+        }),
+      }).addTo(map);
+      // Hotspots get a solid edge; areas still warming up get a dashed one.
+      var hex = L.polygon(area.boundary, {
+        className: 'cp-hex',
+        interactive: false,
+        color: area.hot ? '#E8400C' : '#F08C00',
+        weight: area.hot ? 2.5 : 1.5,
+        dashArray: area.hot ? null : '5 4',
+        fillColor: area.hot ? '#FF5A1F' : '#FF9A3C',
+        fillOpacity: area.hot ? 0.24 : 0.12,
+      }).addTo(map);
+      areas[area.id] = { key: key, glow: glow, hex: hex };
+    });
+    Object.keys(areas).forEach(function (id) {
+      if (!seen[id]) {
+        map.removeLayer(areas[id].glow);
+        map.removeLayer(areas[id].hex);
+        delete areas[id];
+      }
+    });
+  }
+
   function update(message) {
     setTiles(message.dark);
     state.bottomPadding = message.bottomPadding;
     state.reduceMotion = message.reduceMotion;
     state.user = message.user;
+    document.body.classList.toggle('cp-still', message.reduceMotion);
+    updateAreas(message.areas);
 
     var seen = {};
     var selectedPin = null;
     message.pins.forEach(function (pin) {
-      seen[pin.id] = true;
+      var key = pin.kind + ':' + pin.id;
+      seen[key] = true;
       if (pin.selected) selectedPin = pin;
       var html = pinHtml(pin);
-      var marker = markers[pin.id];
+      var marker = markers[key];
       if (!marker) {
         marker = L.marker([pin.latitude, pin.longitude], { keyboard: true });
-        marker.on('click', function () { send({ type: 'select', id: pin.id }); });
+        marker.on('click', function () { send({ type: 'select', kind: pin.kind, id: pin.id }); });
         marker.addTo(map);
-        markers[pin.id] = marker;
+        markers[key] = marker;
       } else {
         marker.setLatLng([pin.latitude, pin.longitude]);
       }
@@ -236,8 +377,8 @@ export const LEAFLET_MAP_HTML = `<!doctype html>
         marker.setIcon(L.divIcon({ className: 'cp-icon', html: html, iconSize: null }));
         marker.cpHtml = html;
       }
-      // Keep the selected pin on top of any pins that overlap it.
-      marker.setZIndexOffset(pin.selected ? 1000 : 0);
+      // Keep the selected pin on top of any pins that overlap it, and parties above waypoints.
+      marker.setZIndexOffset(pin.selected ? 1000 : pin.kind === 'event' ? 100 : 0);
       var element = marker.getElement();
       if (element) {
         element.setAttribute('role', 'button');
@@ -270,10 +411,11 @@ export const LEAFLET_MAP_HTML = `<!doctype html>
     button.style.marginBottom = (message.bottomPadding + 12) + 'px';
 
     // Pan to a newly selected pin, whether it was picked on the map or in the list.
-    if (selectedPin && message.selectedId !== state.selectedId) {
+    var selectedKey = message.selected ? message.selected.kind + ':' + message.selected.id : null;
+    if (selectedPin && selectedKey !== state.selectedKey) {
       centerOn(L.latLng(selectedPin.latitude, selectedPin.longitude));
     }
-    state.selectedId = message.selectedId;
+    state.selectedKey = selectedKey;
   }
 
   function receive(data) {
