@@ -281,8 +281,10 @@ Ending a party awards XP to members who checked in; see [XP](docs/mvp.md#xp).
   `me.rank` is null when the user's net XP in the period is zero or negative.
   The app's Leaderboard tab uses this endpoint with a limit of 100 and lets users select each period.
   The older `GET /leaderboard` endpoint still returns all-time ranks including zero-XP accounts.
-- `GET /hotspots?limit=` lists H3 areas reported in the last 30 days with their center point, distinct reporters and report count, busiest first.
+- `GET /hotspots?limit=` lists H3 areas reported in the last 30 days with their center point, hexagon `boundary`, distinct reporters and report count, busiest first.
   It returns 100 areas by default and at most 250.
+  Add `latitude`, `longitude` and `radiusM` together to keep only areas whose center is within `radiusM` meters; sending only some of them gets 400 `INVALID_NEAR_FILTER`.
+  Quests and events carry `areaId`, so the app can tell which ones are in a hotspot.
   `isHotspot` is true when 3 or more different people reported the area, which is when cleaning it earns bonus XP.
 
 ## Equipment and drop-offs

@@ -77,6 +77,13 @@ test('hotspots return map-ready areas, order by activity, enforce limits and req
     assert.ok(Number.isFinite(area.longitude));
     assert.ok(area.latitude >= -90 && area.latitude <= 90);
     assert.ok(area.longitude >= -180 && area.longitude <= 180);
+    // A hexagon, or one of H3's twelve pentagons, with no repeated closing corner.
+    assert.ok(area.boundary.length === 6 || area.boundary.length === 5);
+    assert.notDeepEqual(area.boundary[0], area.boundary.at(-1));
+    for (const corner of area.boundary) {
+      assert.ok(Math.abs(corner.latitude - area.latitude) < 0.01);
+      assert.ok(Math.abs(corner.longitude - area.longitude) < 0.01);
+    }
     assert.ok(Number.isInteger(area.distinctReporters));
     assert.ok(Number.isInteger(area.reports));
     assert.ok(!Number.isNaN(Date.parse(area.lastReportedDay)));
@@ -112,4 +119,24 @@ test('hotspots return map-ready areas, order by activity, enforce limits and req
     headers: { authorization },
   });
   assert.equal(invalidLimit.statusCode, 400);
+
+  // Near an area, only areas whose center is within the radius come back.
+  const [busiest] = result.areas;
+  if (busiest) {
+    const near = await app.inject({
+      method: 'GET',
+      url: `/hotspots?latitude=${busiest.latitude}&longitude=${busiest.longitude}&radiusM=1`,
+      headers: { authorization },
+    });
+    assert.equal(near.statusCode, 200);
+    assert.deepEqual(near.json().areas.map((a: { areaId: string }) => a.areaId), [busiest.areaId]);
+  }
+
+  const partialNear = await app.inject({
+    method: 'GET',
+    url: '/hotspots?latitude=40.7&longitude=-74',
+    headers: { authorization },
+  });
+  assert.equal(partialNear.statusCode, 400);
+  assert.equal(partialNear.json().code, 'INVALID_NEAR_FILTER');
 });

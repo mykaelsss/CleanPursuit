@@ -38,6 +38,7 @@ const questSummarySchema = z.object({
   location: locationSchema,
   placeName: placeNameSchema.nullable(),
   distanceM: z.number().int().describe('Meters from the requested location'),
+  areaId: z.string().describe('H3 area of the report, to match against /hotspots'),
   hazards: z.array(z.string()).describe('Hazard codes, for map icons and warnings'),
   photo: photoSchema,
   createdAt: z.iso.datetime(),
@@ -158,13 +159,14 @@ const questRoutes: FastifyPluginAsyncZod = async (app) => {
         longitude: number;
         place_name: string | null;
         distance_m: number;
+        area_id: string;
         hazards: string[];
         photo_file_id: string;
         photo_key: string;
         created_at: Date;
       }>(
         `SELECT q.id, q.title, q.status, r.difficulty_tier, ${selectLocation('r.location')}, r.place_name,
-                round(ST_Distance(r.location, ${geographyPoint(2, 1)}))::integer AS distance_m,
+                round(ST_Distance(r.location, ${geographyPoint(2, 1)}))::integer AS distance_m, r.area_id::text,
                 ARRAY(SELECT hazard_code FROM report_hazard WHERE report_id = r.id ORDER BY hazard_code) AS hazards,
                 r.photo_file_id, f.key AS photo_key, q.created_at
          FROM quest q
@@ -186,6 +188,7 @@ const questRoutes: FastifyPluginAsyncZod = async (app) => {
           location: { latitude: row.latitude, longitude: row.longitude },
           placeName: row.place_name,
           distanceM: row.distance_m,
+          areaId: row.area_id,
           hazards: row.hazards,
           photo: { id: row.photo_file_id, url: await app.storage.presignDownload(row.photo_key) },
           createdAt: row.created_at.toISOString(),
