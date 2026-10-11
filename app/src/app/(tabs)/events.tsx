@@ -24,6 +24,7 @@ import {
 import { ReduceMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import AppHeader, { COMPACT_HEADER_HEIGHT } from '@/components/app-header';
 import { EventCard, SitePhoto } from '@/components/event-card';
 import { displayStyles, squish, TierBadge, XpBadge, xpText } from '@/components/quest-ui';
 import { EventsMap } from '@/components/events-map';
@@ -249,7 +250,7 @@ export default function EventsScreen() {
     () => ({
       backgroundStyle: { backgroundColor: theme.background },
       bottomInset: BottomTabInset,
-      topInset: insets.top,
+      topInset: insets.top + COMPACT_HEADER_HEIGHT,
       enableDynamicSizing: false,
       // The library makes the whole sheet one accessible element by default, which hides its
       // rows and buttons from VoiceOver. Leave the sheet itself out so its contents are reachable.
@@ -269,6 +270,14 @@ export default function EventsScreen() {
 
   return (
     <ThemedView style={styles.container} onLayout={onLayout}>
+      <AppHeader
+        accessibilityElementsHidden={isCardOpen}
+        backgroundColor="backgroundElement"
+        brandColor="text"
+        importantForAccessibility={isCardOpen ? 'no-hide-descendants' : 'auto'}
+        style={styles.appHeader}
+      />
+
       {/* While the card is open, screen readers stay inside it instead of wandering onto the map and list. */}
       <View
         style={StyleSheet.absoluteFill}
@@ -467,6 +476,13 @@ const EventRow = memo(function EventRow({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  appHeader: {
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 10,
   },
   handle: {
     alignItems: 'center',
