@@ -510,6 +510,168 @@ describe('parties', { skip }, () => {
     assert.equal(xpAfterDuplicate.rows[0].total_xp, 10);
   });
 
+
+  test('awards a capped hotspot bonus once when three distinct reporters qualify', async (t) => {
+    const { app, storage } = await startApp(t);
+    const leader = await signUp(app);
+    const reporterA = await signUp(app);
+    const reporterB = await signUp(app);
+    const spot = randomSpot();
+
+    const questId = await createQuest(
+      app,
+      storage,
+      leader.authorization,
+      spot,
+    );
+
+    const pool = createPool(env.DATABASE_URL);
+    t.after(() => pool.end());
+
+    const reportFacts = await pool.query<{
+      report_id: string;
+      area_id: string;
+    }>(
+      `SELECT q.report_id, e.area_id::text AS area_id
+       FROM quest q
+       JOIN activity_event e
+         ON e.report_id = q.report_id
+        AND e.kind = 'report_submitted'
+       WHERE q.id = $1
+         AND e.area_id IS NOT NULL
+       ORDER BY e.occurred_at ASC
+       LIMIT 1`,
+      [questId],
+    );
+
+    assert.equal(reportFacts.rowCount, 1);
+    const reportFact = reportFacts.rows[0];
+    assert.ok(reportFact, 'expected the quest report and area');
+    const { report_id: reportId, area_id: areaId } = reportFact;
+
+    // The quest creator is the first reporter. Add two distinct reporters
+    // in the same area to exercise the three-reporter hotspot threshold.
+    await pool.query(
+      `INSERT INTO activity_event (kind, user_id, area_id, report_id)
+       VALUES
+         ('report_submitted', $1, $3::h3index, $2),
+         ('report_submitted', $4, $3::h3index, $2)`,
+      [reporterA.userId, reportId, areaId, reporterB.userId],
+    );
+
+    const hotspot = await pool.query<{ distinct_reporters: number | string }>(
+      `SELECT distinct_reporters
+       FROM area_hotspot_30d
+       WHERE area_id = $1::h3index`,
+      [areaId],
+    );
+
+    assert.ok(
+      Number(hotspot.rows[0]?.distinct_reporters ?? 0) >= 3,
+      'the test area should meet the three-distinct-reporter threshold',
+    );
+
+    const { partyId, scheduledStart } = await createScheduledParty(
+      app,
+      leader.authorization,
+      questId,
+    );
+
+    const waitMs = Math.max(0, scheduledStart.getTime() - Date.now() + 25);
+    await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+
+    const checkIn = await app.inject({
+      method: 'POST',
+      url: `/parties/${partyId}/check-in`,
+      headers: { authorization: leader.authorization },
+      payload: { location: spot },
+    });
+
+    assert.equal(checkIn.statusCode, 200);
+
+    const afterPhotoFileId = await uploadPhoto(
+      app,
+      storage,
+      leader.authorization,
+    );
+
+    // Backdate the confirmed check-in for a deterministic 9-minute base
+    // award, without waiting nine real minutes during the test.
+    await pool.query(
+      `UPDATE party_member
+       SET checked_in_at = clock_timestamp() - interval '9 minutes',
+           last_on_site_at = clock_timestamp()
+       WHERE party_id = $1 AND user_id = $2`,
+      [partyId, leader.userId],
+    );
+
+    const end = await app.inject({
+      method: 'POST',
+      url: `/parties/${partyId}/end`,
+      headers: { authorization: leader.authorization },
+      payload: {
+        afterPhotoFileId,
+        bagCount: 2,
+        outcome: 'completed',
+      },
+    });
+
+    assert.equal(end.statusCode, 200);
+    assert.equal(end.json().status, 'completed');
+
+    const awards = await pool.query(
+      `SELECT
+         u.total_xp,
+         (SELECT xp FROM activity_event
+          WHERE party_id = $1 AND user_id = $2
+            AND kind = 'party_xp_awarded'
+          ORDER BY occurred_at DESC LIMIT 1) AS base_xp,
+         (SELECT xp FROM activity_event
+          WHERE party_id = $1 AND user_id = $2
+            AND kind = 'hotspot_bonus'
+          ORDER BY occurred_at DESC LIMIT 1) AS bonus_xp,
+         (SELECT count(*)::int FROM activity_event
+          WHERE party_id = $1 AND user_id = $2
+            AND kind = 'hotspot_bonus') AS bonus_events
+       FROM app_user u
+       WHERE u.id = $2`,
+      [partyId, leader.userId],
+    );
+
+    assert.equal(awards.rows[0].base_xp, 90);
+    assert.equal(awards.rows[0].bonus_xp, 10);
+    assert.equal(awards.rows[0].bonus_events, 1);
+    assert.equal(awards.rows[0].total_xp, 100);
+
+    const duplicateEnd = await app.inject({
+      method: 'POST',
+      url: `/parties/${partyId}/end`,
+      headers: { authorization: leader.authorization },
+      payload: {
+        afterPhotoFileId,
+        bagCount: 2,
+        outcome: 'completed',
+      },
+    });
+
+    assert.equal(duplicateEnd.statusCode, 409);
+    assert.equal(duplicateEnd.json().code, 'PARTY_NOT_ACTIVE');
+
+    const afterDuplicate = await pool.query(
+      `SELECT
+         u.total_xp,
+         (SELECT count(*)::int FROM activity_event
+          WHERE party_id = $1 AND user_id = $2
+            AND kind = 'hotspot_bonus') AS bonus_events
+       FROM app_user u
+       WHERE u.id = $2`,
+      [partyId, leader.userId],
+    );
+
+    assert.equal(afterDuplicate.rows[0].total_xp, 100);
+    assert.equal(afterDuplicate.rows[0].bonus_events, 1);
+  });
+
   test('a partial cleanup awards XP but leaves the quest open', async (t) => {
     const { app, storage } = await startApp(t);
     const leader = await signUp(app);

@@ -882,30 +882,72 @@ const partyRoutes: FastifyPluginAsyncZod = async (app) => {
 					],
 				);
 
-				// Record each eligible member's XP award and keep all-time XP in sync.
-				for (const member of participants) {
-					await client.query(
-						`INSERT INTO activity_event
+				// Award a hotspot bonus only for completed cleanups in areas with
+                            // at least three distinct reporters in the last 30 days.
+                            const hotspotResult =
+                                    outcome === "completed"
+                                            ? await client.query<{
+                                                      distinct_reporters: number | string;
+                                              }>(
+                                                      `SELECT distinct_reporters
+                                                       FROM area_hotspot_30d
+                                                       WHERE area_id = $1::h3index`,
+                                                      [party.area_id],
+                                              )
+                                            : null;
+
+                            const qualifiesForHotspotBonus =
+                                    Number(
+                                            hotspotResult?.rows[0]?.distinct_reporters ?? 0,
+                                    ) >= 3;
+
+                            // Record base XP and any eligible hotspot bonus.
+                            for (const member of participants) {
+                                    await client.query(
+                                            `INSERT INTO activity_event
                (kind, user_id, guild_id, area_id, quest_id, party_id, xp, minutes_on_site)
              VALUES ('party_xp_awarded', $1, $2, $3, $4, $5, $6, $7)`,
-						[
-							member.userId,
-							member.guildId,
-							party.area_id,
-							party.quest_id,
-							partyId,
-							member.xp,
-							member.minutesOnSite,
-						],
-					);
+                                            [
+                                                    member.userId,
+                                                    member.guildId,
+                                                    party.area_id,
+                                                    party.quest_id,
+                                                    partyId,
+                                                    member.xp,
+                                                    member.minutesOnSite,
+                                            ],
+                                    );
 
-					await client.query(
-						`UPDATE app_user
+                                    const hotspotBonusXp = qualifiesForHotspotBonus
+                                            ? Math.min(
+                                                      Math.floor((member.xp * 20) / 100),
+                                                      Math.max(0, 100 - member.xp),
+                                              )
+                                            : 0;
+
+                                    if (hotspotBonusXp > 0) {
+                                            await client.query(
+                                                    `INSERT INTO activity_event
+                 (kind, user_id, guild_id, area_id, quest_id, party_id, xp)
+               VALUES ('hotspot_bonus', $1, $2, $3, $4, $5, $6)`,
+                                                    [
+                                                            member.userId,
+                                                            member.guildId,
+                                                            party.area_id,
+                                                            party.quest_id,
+                                                            partyId,
+                                                            hotspotBonusXp,
+                                                    ],
+                                            );
+                                    }
+
+                                    await client.query(
+                                            `UPDATE app_user
              SET total_xp = total_xp + $2
              WHERE id = $1`,
-						[member.userId, member.xp],
-					);
-				}
+                                            [member.userId, member.xp + hotspotBonusXp],
+                                    );
+                            }
 
 				if (outcome === "completed") {
 					await client.query(
