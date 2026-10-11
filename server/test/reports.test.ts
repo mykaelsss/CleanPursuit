@@ -382,6 +382,7 @@ describe('reports and quests', { skip }, () => {
     const analysis = first.json();
     assert.equal(analysis.fileId, fileId);
     assert.equal(analysis.showsLitter, true);
+    assert.equal(analysis.title, 'Clear bottles by the bench');
     assert.deepEqual(analysis.categories, ['glass', 'plastic']);
     assert.deepEqual(analysis.hazards, ['broken_glass']);
     assert.deepEqual(analysis.estimatedVolume, {

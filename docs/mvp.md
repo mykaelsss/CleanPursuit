@@ -44,7 +44,7 @@ The demo works end to end with these six features.
 
 - **Gemini photo analysis.**
   One call per report photo, made right after upload, before the report is sent.
-  Gemini returns structured JSON: whether the photo shows litter, a suggested description, trash categories from a fixed list, hazard flags, a trash volume range and terrain.
+  Gemini returns structured JSON: whether the photo shows litter, a suggested quest title and description, trash categories from a fixed list, hazard flags, a trash volume range and terrain.
   The report form opens prefilled, the reporter confirms or edits it, and our own rules map the tags to a difficulty tier: easy, medium, hard or legendary.
 - **Equipment and warnings lookup.**
   Tables keyed by trash category and hazard, so Gemini is never called again for gear lists.
@@ -90,7 +90,7 @@ A group gets credit together, and a cleanup can take several tries.
 
 - A user submits a photo, location and description.
 - The location snaps to an H3 cell (resolution 10, about 75 m edge) stored as `area_id`.
-- Gemini looks at the photo as soon as it is uploaded and prefills the form with a description, trash categories, hazards and a trash amount (see [Trash amount](#trash-amount)).
+- Gemini looks at the photo as soon as it is uploaded and prefills the form with a quest title, a description, trash categories, hazards and a trash amount (see [Trash amount](#trash-amount)).
 - The reporter confirms or edits the categories and any hazards, and our rules set the difficulty tier from them (see [Difficulty tier](#difficulty-tier)).
 - Selecting sharps or biohazard shows a Yes/No warning before the hazard is added to the report.
   The warning tells volunteers not to pick up or touch the item and points them to drop-off and sanitation escalation information.
@@ -403,7 +403,7 @@ The core loop ships first so there is always a working demo.
 
 Done:
 
-- Schema migrations `001` to `008` are applied to the DEV Tiger service and tested.
+- Schema migrations `001` to `009` are applied to the DEV Tiger service and tested.
 - API: auth, photo uploads to R2, Gemini photo analysis, reports with duplicate detection and difficulty tiers, quests, events and scheduled parties with GPS check-in and presence, ending a party with XP from presence pings and the hotspot bonus, daily, weekly, monthly and all-time leaderboards, hotspots, equipment and drop-offs.
 - 196 sharps drop-off sites imported from NYC Open Data.
 - Region: New York City (the five boroughs) for seed data, drop-off locations, escalation contacts and the resources page.

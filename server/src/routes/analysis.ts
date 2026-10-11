@@ -11,6 +11,7 @@ const security = [{ bearerAuth: [] }];
 const photoAnalysisSchema = z.object({
   fileId: z.uuid(),
   showsLitter: z.boolean().describe('False when Gemini sees no litter; warn the reporter, but let them continue'),
+  title: z.string().nullable().describe('Suggested quest title; null when there is no litter'),
   description: z.string().describe('Suggested report description'),
   categories: z.array(z.string()).describe('Suggested category codes from GET /tags'),
   hazards: z.array(z.string()).describe('Suggested hazard codes from GET /tags'),
@@ -27,6 +28,7 @@ type PhotoAnalysis = z.infer<typeof photoAnalysisSchema>;
 interface AnalysisRow {
   file_id: string;
   shows_litter: boolean;
+  title: string | null;
   description: string;
   category_codes: string[];
   hazard_codes: string[];
@@ -37,13 +39,14 @@ interface AnalysisRow {
   created_at: Date;
 }
 
-const ANALYSIS_COLUMNS = `file_id, shows_litter, description, category_codes, hazard_codes,
+const ANALYSIS_COLUMNS = `file_id, shows_litter, title, description, category_codes, hazard_codes,
                           estimated_volume_min_gallons, estimated_volume_max_gallons, terrain, model, created_at`;
 
 function toAnalysis(row: AnalysisRow): PhotoAnalysis {
   return {
     fileId: row.file_id,
     showsLitter: row.shows_litter,
+    title: row.title,
     description: row.description,
     categories: row.category_codes,
     hazards: row.hazard_codes,
@@ -70,7 +73,7 @@ const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
         tags: ['files'],
         summary: 'Suggest report tags for an uploaded photo',
         description:
-          'Gemini looks at the photo and suggests a description, categories, hazards and a trash amount to prefill the ' +
+          'Gemini looks at the photo and suggests a quest title, description, categories, hazards and a trash amount to prefill the ' +
           'report form. The reporter confirms or edits them before `POST /reports`. ' +
           'Each photo is analyzed once; calling again returns the same result. ' +
           'On 503 `ANALYSIS_UNAVAILABLE`, show the form empty.',
@@ -124,16 +127,17 @@ const analysisRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const { analysis } = result;
       const inserted = await app.db.query<AnalysisRow>(
-        `INSERT INTO photo_analysis (file_id, model, shows_litter, description, category_codes, hazard_codes,
+        `INSERT INTO photo_analysis (file_id, model, shows_litter, title, description, category_codes, hazard_codes,
                                      estimated_volume_min_gallons, estimated_volume_max_gallons, terrain,
                                      input_tokens, output_tokens, latency_ms)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT (file_id) DO NOTHING
          RETURNING ${ANALYSIS_COLUMNS}`,
         [
           fileId,
           result.model,
           analysis.showsLitter,
+          analysis.title,
           analysis.description,
           analysis.categories,
           analysis.hazards,
