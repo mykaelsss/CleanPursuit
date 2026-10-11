@@ -1,6 +1,7 @@
 import { StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import AppHeader from '@/components/app-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
@@ -11,7 +12,9 @@ export default function HomeScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+      <AppHeader backgroundColor="backgroundElement" brandColor="tint" />
+
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
         <ThemedText type="subtitle">Hi, {user?.username}</ThemedText>
 
         <ThemedView type="backgroundElement" style={styles.card}>
@@ -42,12 +45,12 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'center',
   },
   safeArea: {
+    alignSelf: 'center',
     flex: 1,
     maxWidth: MaxContentWidth,
+    width: '100%',
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.four,
     paddingBottom: BottomTabInset + Spacing.three,
