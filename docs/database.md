@@ -237,6 +237,8 @@ All aggregates are real-time (`materialized_only = false`) and bucket in UTC.
 - The daily, weekly and monthly leaderboards read the current UTC bucket from the matching aggregate.
   The current week and month are never materialized yet, so their rows are rolled up from `xp_daily_by_user` when read.
   The API filters on a range of fixed timestamps rather than `bucket = time_bucket(..., now())`, so TimescaleDB pushes the filter down to the bucket index.
+- `GET /leaderboards` also counts users with more XP than the caller across the full period to return their personal rank independently of the list limit.
+  It uses the same aggregate and UTC bounds as the list, and returns a null rank when the caller's net period XP is zero or negative.
 - A user's level is derived from `total_xp` in the API and is not stored (see [Levels](mvp.md#levels)).
 - `area_hotspot_30d` returns `distinct_reporters`, `reports` and `last_reported_day` per `area_id` for the last 30 days.
 - The heat map and the hotspot bonus use `distinct_reporters`, so one person re-reporting a spot cannot heat it up alone.

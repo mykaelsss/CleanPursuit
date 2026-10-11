@@ -33,15 +33,23 @@ export interface Tokens {
 export type Session = Tokens & { user: User };
 
 // Users with equal XP share a rank.
+export type LeaderboardPeriod = 'all' | 'day' | 'week' | 'month';
+
 export interface LeaderboardEntry {
   rank: number;
-  user: { id: string; username: string };
+  userId: string;
+  username: string;
+  xp: number;
   totalXp: number;
 }
 
 export interface Leaderboard {
+  period: LeaderboardPeriod;
+  periodStart: string | null;
   entries: LeaderboardEntry[];
-  me: { rank: number; totalXp: number };
+  limit: number;
+  // A user without positive XP in this period is unranked, even if they have all-time XP.
+  me: { rank: number | null; xp: number; totalXp: number };
 }
 
 export type DifficultyTier = 'easy' | 'medium' | 'hard' | 'legendary';
